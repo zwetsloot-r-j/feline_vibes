@@ -1,27 +1,62 @@
-[gd_scene load_steps=5 format=3 uid="uid://chlqkqv2h8yah"]
+[gd_scene load_steps=8 format=3 uid="uid://chlqkqv2h8yah"]
 
 [ext_resource type="Script" path="res://main_3d.gd" id="1_7xm2k"]
-[ext_resource type="PackedScene" uid="uid://c0mo8tek77du4" path="res://CharacterSkin.tscn" id="2_character"]
+[ext_resource type="PackedScene" uid="uid://b8x7qwerty123" path="res://Player.tscn" id="2_player"]
+[ext_resource type="Shader" path="res://checker_floor.gdshader" id="3_checker"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_1b2c3"]
-size = Vector2(20, 20)
+size = Vector2(200, 200)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1a2b3"]
-albedo_color = Color(0.2, 0.8, 0.2, 1)
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_1a2b3"]
+shader = ExtResource("3_checker")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_1"]
+size = Vector3(200, 0.1, 200)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_walls"]
+size = Vector3(1, 10, 1)
 
 [node name="Main3D" type="Node3D"]
 script = ExtResource("1_7xm2k")
-
-[node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 2, 5)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 2, 0)
 shadow_enabled = true
 
-[node name="Floor" type="MeshInstance3D" parent="."]
-mesh = SubResource("PlaneMesh_1b2c3")
-surface_material_override/0 = SubResource("StandardMaterial3D_1a2b3")
+[node name="Floor" type="StaticBody3D" parent="."]
 
-[node name="Character" parent="." instance=ExtResource("2_character")]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("PlaneMesh_1b2c3")
+surface_material_override/0 = SubResource("ShaderMaterial_1a2b3")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_1")
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+
+[node name="InvisibleWalls" type="Node3D" parent="."]
+
+[node name="WallNorth" type="StaticBody3D" parent="InvisibleWalls"]
+transform = Transform3D(200, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, -100)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InvisibleWalls/WallNorth"]
+shape = SubResource("BoxShape3D_walls")
+
+[node name="WallSouth" type="StaticBody3D" parent="InvisibleWalls"]
+transform = Transform3D(200, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 100)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InvisibleWalls/WallSouth"]
+shape = SubResource("BoxShape3D_walls")
+
+[node name="WallEast" type="StaticBody3D" parent="InvisibleWalls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 200, 100, 5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InvisibleWalls/WallEast"]
+shape = SubResource("BoxShape3D_walls")
+
+[node name="WallWest" type="StaticBody3D" parent="InvisibleWalls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 200, -100, 5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InvisibleWalls/WallWest"]
+shape = SubResource("BoxShape3D_walls")
