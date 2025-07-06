@@ -1,0 +1,16 @@
+# Godot 4+ specific ignores
+.godot/
+.import/
+/android/
+
+# Exported files
+*.tmp
+*.pck
+*.exe
+*.dmg
+*.app
+
+# Logs and caches
+logs/
+*.log
+.mono/

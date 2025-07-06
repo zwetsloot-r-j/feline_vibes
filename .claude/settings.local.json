@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(godot4:*)",
+      "Bash(rm:*)"
+    ],
+    "deny": []
+  }
+}
