@@ -3,7 +3,8 @@
     "allow": [
       "Bash(ls:*)",
       "Bash(godot4:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }
