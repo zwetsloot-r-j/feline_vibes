@@ -4,6 +4,8 @@ extends CharacterBody3D
 @export var dash_force: float = 15.0
 @export var dash_duration: float = 0.3
 @export var rotation_speed: float = 10.0
+@export var step_height: float = 1.3  # Slightly higher than voxel size (1.2)
+@export var step_check_distance: float = 0.8  # How far ahead to check for steps
 
 var gravity: float = 9.8
 var dash_timer: float = 0.0
@@ -77,4 +79,82 @@ func _physics_process(delta):
 		velocity.x = move_toward(velocity.x, 0, speed * delta * 3)
 		velocity.z = move_toward(velocity.z, 0, speed * delta * 3)
 	
+	# Apply step-up functionality before moving
+	if is_on_floor() and velocity.length() > 0:
+		attempt_step_up()
+	
 	move_and_slide()
+
+func attempt_step_up():
+	var horizontal_velocity = Vector3(velocity.x, 0, velocity.z)
+	if horizontal_velocity.length() < 0.1:
+		return
+	
+	var move_direction = horizontal_velocity.normalized()
+	var space_state = get_world_3d().direct_space_state
+	
+	# Debug movement direction
+	var direction_name = get_direction_name(move_direction)
+	
+	# Use a more aggressive approach - check ground level directly ahead
+	var check_distance = step_check_distance * 1.5  # Look further ahead
+	var target_position = global_position + move_direction * check_distance
+	
+	# Check ground level at target position
+	var ground_check_start = target_position + Vector3(0, step_height, 0)
+	var ground_check_end = target_position + Vector3(0, -step_height, 0)
+	
+	var ground_query = PhysicsRayQueryParameters3D.create(ground_check_start, ground_check_end)
+	ground_query.exclude = [self]
+	var ground_result = space_state.intersect_ray(ground_query)
+	
+	if not ground_result:
+		# Try checking closer if no ground found
+		target_position = global_position + move_direction * (check_distance * 0.5)
+		ground_check_start = target_position + Vector3(0, step_height, 0)
+		ground_check_end = target_position + Vector3(0, -step_height, 0)
+		
+		ground_query = PhysicsRayQueryParameters3D.create(ground_check_start, ground_check_end)
+		ground_query.exclude = [self]
+		ground_result = space_state.intersect_ray(ground_query)
+		
+		if not ground_result:
+			return  # Still no ground found
+	
+	var target_ground_height = ground_result.position.y
+	var current_ground_height = global_position.y
+	var step_up_height = target_ground_height - current_ground_height
+	
+	# Debug information
+	print("Direction: ", direction_name, " | Current Y: ", current_ground_height, " | Target Y: ", target_ground_height, " | Step height: ", step_up_height)
+	
+	# Step up if it's a reasonable height (positive and within limit)
+	if step_up_height > 0.1 and step_up_height <= step_height:
+		# Simple clearance check - just make sure character fits
+		var clearance_start = Vector3(target_position.x, target_ground_height + 0.1, target_position.z)
+		var clearance_end = clearance_start + Vector3(0, 2.0, 0)  # Character height check
+		
+		var clearance_query = PhysicsRayQueryParameters3D.create(clearance_start, clearance_end)
+		clearance_query.exclude = [self]
+		var clearance_result = space_state.intersect_ray(clearance_query)
+		
+		if not clearance_result:  # No ceiling blocking
+			# Move the character up smoothly
+			global_position.y = target_ground_height + 0.1
+			print("SUCCESS: Stepped up ", step_up_height, " units moving ", direction_name)
+		else:
+			print("BLOCKED: Ceiling blocking step-up moving ", direction_name)
+	else:
+		if step_up_height <= 0.1:
+			print("SKIP: Step too small (", step_up_height, ") moving ", direction_name)
+		else:
+			print("SKIP: Step too high (", step_up_height, ") moving ", direction_name)
+
+func get_direction_name(direction: Vector3) -> String:
+	var abs_x = abs(direction.x)
+	var abs_z = abs(direction.z)
+	
+	if abs_x > abs_z:
+		return "EAST" if direction.x > 0 else "WEST"
+	else:
+		return "SOUTH" if direction.z > 0 else "NORTH"

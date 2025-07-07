@@ -1,0 +1,24 @@
+[gd_scene load_steps=4 format=3 uid="uid://bvoxel123world"]
+
+[ext_resource type="Script" path="res://VoxelWorldController.gd" id="1_controller"]
+[ext_resource type="Script" path="res://VoxelGenerator.gd" id="2_voxel"]
+[ext_resource type="PackedScene" uid="uid://b8x7qwerty123" path="res://Player.tscn" id="3_player"]
+
+[node name="VoxelWorld" type="Node3D"]
+script = ExtResource("1_controller")
+
+[node name="VoxelGenerator" type="Node3D" parent="."]
+script = ExtResource("2_voxel")
+map_size = Vector3i(64, 24, 64)
+voxel_size = 1.2
+noise_scale = 0.08
+water_level = 10
+grass_level = 16
+generate_on_start = true
+
+[node name="Player" parent="." instance=ExtResource("3_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 30, 38)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 20, 0)
+shadow_enabled = true
