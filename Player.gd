@@ -125,9 +125,6 @@ func attempt_step_up():
 	var current_ground_height = global_position.y
 	var step_up_height = target_ground_height - current_ground_height
 	
-	# Debug information
-	print("Direction: ", direction_name, " | Current Y: ", current_ground_height, " | Target Y: ", target_ground_height, " | Step height: ", step_up_height)
-	
 	# Step up if it's a reasonable height (positive and within limit)
 	if step_up_height > 0.1 and step_up_height <= step_height:
 		# Simple clearance check - just make sure character fits
@@ -141,14 +138,6 @@ func attempt_step_up():
 		if not clearance_result:  # No ceiling blocking
 			# Move the character up smoothly
 			global_position.y = target_ground_height + 0.1
-			print("SUCCESS: Stepped up ", step_up_height, " units moving ", direction_name)
-		else:
-			print("BLOCKED: Ceiling blocking step-up moving ", direction_name)
-	else:
-		if step_up_height <= 0.1:
-			print("SKIP: Step too small (", step_up_height, ") moving ", direction_name)
-		else:
-			print("SKIP: Step too high (", step_up_height, ") moving ", direction_name)
 
 func get_direction_name(direction: Vector3) -> String:
 	var abs_x = abs(direction.x)
