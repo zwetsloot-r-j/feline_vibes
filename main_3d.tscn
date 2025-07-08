@@ -1,8 +1,9 @@
-[gd_scene load_steps=8 format=3 uid="uid://chlqkqv2h8yah"]
+[gd_scene load_steps=9 format=3 uid="uid://chlqkqv2h8yah"]
 
 [ext_resource type="Script" path="res://main_3d.gd" id="1_7xm2k"]
 [ext_resource type="PackedScene" uid="uid://b8x7qwerty123" path="res://Player.tscn" id="2_player"]
 [ext_resource type="Shader" path="res://checker_floor.gdshader" id="3_checker"]
+[ext_resource type="Script" path="res://CameraController.gd" id="4_camera"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_1b2c3"]
 size = Vector2(200, 200)
@@ -34,6 +35,14 @@ shape = SubResource("BoxShape3D_1")
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+
+[node name="CameraController" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 15, 8)
+script = ExtResource("4_camera")
+target = NodePath("../Player")
+follow_speed = 5.0
+fixed_distance = 6.0
+height_offset = 10.0
 
 [node name="InvisibleWalls" type="Node3D" parent="."]
 
