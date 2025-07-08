@@ -9,6 +9,7 @@
 *.exe
 *.dmg
 *.app
+builds/*
 
 # Logs and caches
 logs/
