@@ -1,4 +1,4 @@
-[gd_scene load_steps=5 format=3 uid="uid://bvoxel123world"]
+[gd_scene load_steps=5 format=3 uid="uid://bk77c87k0uiyn"]
 
 [ext_resource type="Script" path="res://VoxelWorldController.gd" id="1_controller"]
 [ext_resource type="Script" path="res://VoxelGenerator.gd" id="2_voxel"]
@@ -15,7 +15,6 @@ voxel_size = 1.2
 noise_scale = 0.08
 water_level = 10
 grass_level = 16
-generate_on_start = true
 render_distance = 24.0
 player = NodePath("../Player")
 chunk_size = 8
@@ -28,17 +27,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 192, 30, 192)
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 192, 40, 198)
 script = ExtResource("4_camera")
 target = NodePath("../Player")
-follow_speed = 5.0
-fixed_distance = 6.0
-height_offset = 10.0
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 20, 0)
 light_energy = 1.2
 shadow_enabled = true
 directional_shadow_mode = 0
-directional_shadow_split_1 = 0.1
-directional_shadow_split_2 = 0.2
-directional_shadow_split_3 = 0.5
-directional_shadow_blend_splits = false
 directional_shadow_max_distance = 50.0

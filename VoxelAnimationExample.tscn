@@ -1,0 +1,106 @@
+[gd_scene load_steps=5 format=3 uid="uid://bohp0c1ai7fqh"]
+
+[ext_resource type="Script" path="res://VoxelSkeleton.gd" id="1_skeleton"]
+[ext_resource type="Script" path="res://VoxelAnimationSystem.gd" id="2_animation"]
+[ext_resource type="Script" path="res://VoxelConstraintSystem.gd" id="3_constraint"]
+[ext_resource type="Script" path="res://VoxelAnimationExample.gd" id="4_controller"]
+
+[node name="VoxelAnimationExample" type="Node3D"]
+script = ExtResource("4_controller")
+
+[node name="VoxelSkeleton" type="Node3D" parent="."]
+script = ExtResource("1_skeleton")
+skeleton_name = "HumanoidExample"
+
+[node name="VoxelAnimationSystem" type="Node3D" parent="VoxelSkeleton"]
+script = ExtResource("2_animation")
+
+[node name="VoxelConstraintSystem" type="Node" parent="VoxelSkeleton"]
+script = ExtResource("3_constraint")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5, 10)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 5, 0)
+shadow_enabled = true
+
+[node name="UI" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -200.0
+offset_right = 300.0
+offset_bottom = -20.0
+grow_vertical = 0
+
+[node name="EntityTypeLabel" type="Label" parent="UI/VBoxContainer"]
+layout_mode = 2
+text = "Entity Type: Humanoid"
+
+[node name="EntityButtons" type="HBoxContainer" parent="UI/VBoxContainer"]
+layout_mode = 2
+
+[node name="HumanoidBtn" type="Button" parent="UI/VBoxContainer/EntityButtons"]
+layout_mode = 2
+text = "Humanoid"
+
+[node name="QuadrupedBtn" type="Button" parent="UI/VBoxContainer/EntityButtons"]
+layout_mode = 2
+text = "Quadruped"
+
+[node name="BirdBtn" type="Button" parent="UI/VBoxContainer/EntityButtons"]
+layout_mode = 2
+text = "Bird"
+
+[node name="HSeparator" type="HSeparator" parent="UI/VBoxContainer"]
+layout_mode = 2
+
+[node name="AnimationLabel" type="Label" parent="UI/VBoxContainer"]
+layout_mode = 2
+text = "Animation: idle"
+
+[node name="AnimationButtons" type="HBoxContainer" parent="UI/VBoxContainer"]
+layout_mode = 2
+
+[node name="IdleBtn" type="Button" parent="UI/VBoxContainer/AnimationButtons"]
+layout_mode = 2
+text = "Idle"
+
+[node name="WalkBtn" type="Button" parent="UI/VBoxContainer/AnimationButtons"]
+layout_mode = 2
+text = "Walk"
+
+[node name="RunBtn" type="Button" parent="UI/VBoxContainer/AnimationButtons"]
+layout_mode = 2
+text = "Run"
+
+[node name="HSeparator2" type="HSeparator" parent="UI/VBoxContainer"]
+layout_mode = 2
+
+[node name="OBJImportLabel" type="Label" parent="UI/VBoxContainer"]
+layout_mode = 2
+text = "OBJ Import:"
+
+[node name="ImportBtn" type="Button" parent="UI/VBoxContainer"]
+layout_mode = 2
+text = "Load OBJ File"
+
+[node name="FileDialog" type="FileDialog" parent="UI"]
+title = "Open a File"
+initial_position = 2
+size = Vector2i(800, 600)
+ok_button_text = "Open"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.obj ; Wavefront OBJ files")

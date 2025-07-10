@@ -4,7 +4,11 @@
       "Bash(ls:*)",
       "Bash(godot4:*)",
       "Bash(rm:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(godot:*)",
+      "Bash(grep:*)",
+      "Bash(cat:*)",
+      "Bash(rg:*)"
     ],
     "deny": []
   }

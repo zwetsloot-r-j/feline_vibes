@@ -1,0 +1,52 @@
+# Test tail model - 2 voxels stacked in Z direction
+# Bounds: (0, 0, 0) to (0.1, 0.1, 0.2)
+# First voxel: (0, 0, 0) to (0.1, 0.1, 0.1)
+# Second voxel: (0, 0, 0.1) to (0.1, 0.1, 0.2)
+
+# Vertices for first voxel (bottom)
+v 0.0 0.0 0.0
+v 0.1 0.0 0.0
+v 0.1 0.1 0.0
+v 0.0 0.1 0.0
+v 0.0 0.0 0.1
+v 0.1 0.0 0.1
+v 0.1 0.1 0.1
+v 0.0 0.1 0.1
+
+# Vertices for second voxel (top)
+v 0.0 0.0 0.1
+v 0.1 0.0 0.1
+v 0.1 0.1 0.1
+v 0.0 0.1 0.1
+v 0.0 0.0 0.2
+v 0.1 0.0 0.2
+v 0.1 0.1 0.2
+v 0.0 0.1 0.2
+
+# Faces for first voxel (bottom)
+# Bottom face
+f 1 2 3 4
+# Top face
+f 5 8 7 6
+# Front face
+f 1 5 6 2
+# Back face
+f 3 7 8 4
+# Left face
+f 1 4 8 5
+# Right face
+f 2 6 7 3
+
+# Faces for second voxel (top)
+# Bottom face
+f 9 10 11 12
+# Top face
+f 13 16 15 14
+# Front face
+f 9 13 14 10
+# Back face
+f 11 15 16 12
+# Left face
+f 9 12 16 13
+# Right face
+f 10 14 15 11

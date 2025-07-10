@@ -9,6 +9,7 @@
 size = Vector2(200, 200)
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_1a2b3"]
+render_priority = 0
 shader = ExtResource("3_checker")
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_1"]
@@ -34,15 +35,11 @@ surface_material_override/0 = SubResource("ShaderMaterial_1a2b3")
 shape = SubResource("BoxShape3D_1")
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 
 [node name="CameraController" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 15, 8)
 script = ExtResource("4_camera")
 target = NodePath("../Player")
-follow_speed = 5.0
-fixed_distance = 6.0
-height_offset = 10.0
 
 [node name="InvisibleWalls" type="Node3D" parent="."]
 
