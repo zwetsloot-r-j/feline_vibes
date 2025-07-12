@@ -67,6 +67,7 @@ func set_voxel_positions(positions: Array, colors: Array = []):
 	while voxel_colors.size() < voxel_positions.size():
 		voxel_colors.append(Color.WHITE)
 	
+	
 	call_deferred("update_mesh")
 	voxels_changed.emit()
 
@@ -109,6 +110,12 @@ func update_mesh():
 		
 		array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		mesh_instance.mesh = array_mesh
+		
+		# Create a material that uses vertex colors
+		var material = StandardMaterial3D.new()
+		material.vertex_color_use_as_albedo = true
+		material.albedo_color = Color.WHITE
+		mesh_instance.set_surface_override_material(0, material)
 		
 		create_collision_shape()
 
@@ -187,6 +194,7 @@ func get_bounds() -> AABB:
 func attach_child_part(child: VoxelPart):
 	if child in child_parts:
 		return
+	
 	
 	# Remove child from its current parent if it has one
 	if child.get_parent() and child.get_parent() != self:

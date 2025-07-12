@@ -8,9 +8,12 @@ static func load_obj_file(file_path: String) -> Dictionary:
 	
 	var file = FileAccess.open(file_path, FileAccess.READ)
 	var vertices: Array = []
+	var texture_coords: Array = []
 	var faces: Array = []
 	var groups: Dictionary = {}
 	var current_group = "default"
+	var current_material = ""
+	var mtllib_file = ""
 	
 	while not file.eof_reached():
 		var line = file.get_line().strip_edges()
@@ -25,18 +28,53 @@ static func load_obj_file(file_path: String) -> Dictionary:
 				)
 				vertices.append(vertex)
 		
+		elif line.begins_with("vt "):
+			var parts = line.split(" ")
+			if parts.size() >= 3:
+				var uv = Vector2(
+					parts[1].to_float(),
+					parts[2].to_float()
+				)
+				texture_coords.append(uv)
+		
+		elif line.begins_with("mtllib "):
+			var parts = line.split(" ")
+			if parts.size() >= 2:
+				mtllib_file = parts[1]
+		
+		elif line.begins_with("usemtl "):
+			var parts = line.split(" ")
+			if parts.size() >= 2:
+				current_material = parts[1]
+		
 		elif line.begins_with("f "):
 			var parts = line.split(" ")
 			var face_indices: Array = []
+			var face_uvs: Array = []
 			
 			for i in range(1, parts.size()):
-				var vertex_data = parts[i].split("/")[0]
-				var index = vertex_data.to_int() - 1
-				if index >= 0 and index < vertices.size():
-					face_indices.append(index)
+				var vertex_data = parts[i].split("/")
+				var vertex_index = vertex_data[0].to_int() - 1
+				if vertex_index >= 0 and vertex_index < vertices.size():
+					face_indices.append(vertex_index)
+					
+					# Handle texture coordinates if present
+					if vertex_data.size() > 1 and vertex_data[1] != "":
+						var uv_index = vertex_data[1].to_int() - 1
+						if uv_index >= 0 and uv_index < texture_coords.size():
+							face_uvs.append(texture_coords[uv_index])
+						else:
+							face_uvs.append(Vector2.ZERO)
+					else:
+						face_uvs.append(Vector2.ZERO)
 			
 			if face_indices.size() >= 3:
-				faces.append(face_indices)
+				var face_data = {
+					"vertices": face_indices,
+					"uvs": face_uvs,
+					"material": current_material
+				}
+				faces.append(face_data)
 				
 				if not current_group in groups:
 					groups[current_group] = []
@@ -49,10 +87,21 @@ static func load_obj_file(file_path: String) -> Dictionary:
 	
 	file.close()
 	
+	# Load material data if available
+	var materials = {}
+	
+	# Look for companion files in assets/models folder
+	var obj_filename = file_path.get_file().get_basename()
+	materials = load_companion_files_from_assets(obj_filename, mtllib_file)
+	
 	return {
 		"vertices": vertices,
+		"texture_coords": texture_coords,
 		"faces": faces,
-		"groups": groups
+		"groups": groups,
+		"materials": materials,
+		"mtllib": mtllib_file,
+		"obj_path": file_path
 	}
 
 static func convert_obj_to_voxels(obj_data: Dictionary, auto_group_parts: bool = true, preserve_position: bool = true) -> Dictionary:
@@ -62,6 +111,7 @@ static func convert_obj_to_voxels(obj_data: Dictionary, auto_group_parts: bool =
 	var vertices = obj_data.vertices
 	var faces = obj_data.faces
 	var groups = obj_data.groups
+	var materials = obj_data.get("materials", {})
 	
 	# Choose offset strategy based on preserve_position flag
 	var offset = Vector3.ZERO
@@ -70,14 +120,15 @@ static func convert_obj_to_voxels(obj_data: Dictionary, auto_group_parts: bool =
 		var bounds = calculate_bounds(vertices)
 		offset = -bounds.position
 	
-	var all_voxels = voxelize_mesh_with_faces(vertices, faces, offset)
+	
+	var all_voxels = voxelize_mesh_with_faces_colored(vertices, faces, offset, materials, obj_data.get("obj_path", ""))
 	
 	var result = {}
 	
 	if auto_group_parts and groups.size() > 1:
 		for group_name in groups:
 			var group_face_indices = groups[group_name]
-			var group_voxels = voxelize_mesh_with_faces_by_indices(vertices, faces, group_face_indices, offset)
+			var group_voxels = voxelize_mesh_with_faces_by_indices_colored(vertices, faces, group_face_indices, offset, materials, obj_data.get("obj_path", ""))
 			var part_name = sanitize_part_name(group_name)
 			result[part_name] = group_voxels
 	else:
@@ -97,6 +148,234 @@ static func calculate_bounds(vertices: Array) -> AABB:
 		max_pos = max_pos.max(vertex)
 	
 	return AABB(min_pos, max_pos - min_pos)
+
+static func load_companion_files_from_assets(obj_filename: String, mtllib_file: String) -> Dictionary:
+	var assets_dir = "res://assets/models/"
+	var materials = {}
+	
+	# First, try to find MTL file
+	var mtl_candidates = []
+	if mtllib_file != "":
+		mtl_candidates.append(mtllib_file)
+	mtl_candidates.append(obj_filename + ".mtl")
+	
+	for mtl_candidate in mtl_candidates:
+		var mtl_path = assets_dir + mtl_candidate
+		if FileAccess.file_exists(mtl_path):
+			materials = load_mtl_file(mtl_path)
+			break
+	
+	
+	return materials
+
+static func load_mtl_file(file_path: String) -> Dictionary:
+	if not FileAccess.file_exists(file_path):
+		return {}
+	
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	if not file:
+		return {}
+	
+	var materials = {}
+	var current_material = ""
+	
+	while not file.eof_reached():
+		var line = file.get_line().strip_edges()
+		
+		if line.begins_with("newmtl "):
+			var parts = line.split(" ")
+			if parts.size() >= 2:
+				current_material = parts[1]
+				materials[current_material] = {
+					"diffuse_color": Color.WHITE,
+					"texture_path": ""
+				}
+		
+		elif line.begins_with("Kd ") and current_material != "":
+			var parts = line.split(" ")
+			if parts.size() >= 4:
+				var color = Color(
+					parts[1].to_float(),
+					parts[2].to_float(),
+					parts[3].to_float()
+				)
+				materials[current_material]["diffuse_color"] = color
+		
+		elif line.begins_with("map_Kd ") and current_material != "":
+			var parts = line.split(" ")
+			if parts.size() >= 2:
+				materials[current_material]["texture_path"] = parts[1]
+	
+	file.close()
+	return materials
+
+static func load_texture_from_path(base_path: String, texture_filename: String) -> Image:
+	var image = Image.new()
+	var error = OK
+	
+	# Try to load from assets/models directory
+	var assets_texture_path = "res://assets/models/" + texture_filename
+	if FileAccess.file_exists(assets_texture_path):
+		error = image.load(assets_texture_path)
+		if error == OK:
+			return image
+	
+	# Try with .png extension in assets directory
+	if not texture_filename.ends_with(".png"):
+		var assets_png_path = "res://assets/models/" + texture_filename + ".png"
+		if FileAccess.file_exists(assets_png_path):
+			error = image.load(assets_png_path)
+			if error == OK:
+				return image
+	
+	# Fallback: look for any PNG/JPG in assets directory that might match
+	var dir = DirAccess.open("res://assets/models/")
+	if dir:
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			var lower_name = file_name.to_lower()
+			var lower_search = texture_filename.to_lower()
+			if (lower_name.ends_with(".png") or lower_name.ends_with(".jpg")) and lower_search in lower_name:
+				var fallback_path = "res://assets/models/" + file_name
+				error = image.load(fallback_path)
+				if error == OK:
+					dir.list_dir_end()
+					return image
+			file_name = dir.get_next()
+		dir.list_dir_end()
+	
+	return null
+
+static func copy_companion_files_to_project(obj_path: String, mtllib_file: String, materials: Dictionary):
+	var obj_dir = obj_path.get_base_dir()
+	var obj_filename = obj_path.get_file().get_basename()
+	
+	print("DEBUG: Copying companion files from: ", obj_dir)
+	print("DEBUG: OBJ filename: ", obj_filename)
+	print("DEBUG: MTL file: ", mtllib_file)
+	
+	# Copy MTL file if it exists
+	if mtllib_file != "":
+		var source_mtl = obj_dir + "/" + mtllib_file
+		var target_mtl = "res://" + mtllib_file
+		
+		print("DEBUG: Checking MTL source: ", source_mtl)
+		print("DEBUG: Checking MTL target: ", target_mtl)
+		
+		if FileAccess.file_exists(source_mtl):
+			print("DEBUG: Source MTL exists")
+			if not FileAccess.file_exists(target_mtl):
+				print("DEBUG: Target MTL doesn't exist, copying...")
+				copy_file_to_project(source_mtl, target_mtl)
+				print("Copied MTL file: " + target_mtl)
+			else:
+				print("DEBUG: Target MTL already exists")
+		else:
+			print("DEBUG: Source MTL doesn't exist")
+	
+	# Copy texture files referenced in materials
+	for material_name in materials:
+		var material = materials[material_name]
+		var texture_path = material.get("texture_path", "")
+		if texture_path != "":
+			var source_texture = obj_dir + "/" + texture_path
+			var target_texture = "res://" + texture_path
+			
+			print("DEBUG: Checking texture source: ", source_texture)
+			
+			if FileAccess.file_exists(source_texture) and not FileAccess.file_exists(target_texture):
+				copy_file_to_project(source_texture, target_texture)
+				print("Copied texture file: " + target_texture)
+	
+	# Also try to copy common companion files based on OBJ filename
+	var common_extensions = [".png", ".jpg", ".jpeg", ".bmp", ".tga"]
+	for ext in common_extensions:
+		var source_texture = obj_dir + "/" + obj_filename + ext
+		var target_texture = "res://" + obj_filename + ext
+		
+		print("DEBUG: Checking companion texture: ", source_texture)
+		
+		if FileAccess.file_exists(source_texture):
+			print("DEBUG: Found companion texture: ", source_texture)
+			if not FileAccess.file_exists(target_texture):
+				copy_file_to_project(source_texture, target_texture)
+				print("Copied companion texture: " + target_texture)
+			else:
+				print("DEBUG: Target texture already exists")
+
+static func auto_detect_companion_files(obj_path: String):
+	var obj_dir = obj_path.get_base_dir()
+	var obj_filename = obj_path.get_file().get_basename()
+	
+	print("DEBUG: Auto-detecting companion files for: ", obj_filename)
+	
+	# Try to find and copy MTL file with same name as OBJ
+	var mtl_filename = obj_filename + ".mtl"
+	var source_mtl = obj_dir + "/" + mtl_filename
+	var target_mtl = "res://" + mtl_filename
+	
+	if FileAccess.file_exists(source_mtl):
+		print("DEBUG: Found auto-detected MTL: ", source_mtl)
+		if not FileAccess.file_exists(target_mtl):
+			copy_file_to_project(source_mtl, target_mtl)
+			print("Copied auto-detected MTL: " + target_mtl)
+		
+		# Now load the MTL file and copy its textures
+		var materials = load_mtl_file(source_mtl)
+		if materials.size() > 0:
+			copy_companion_files_to_project(obj_path, mtl_filename, materials)
+	
+	# Try to find and copy texture files with same name as OBJ
+	var common_extensions = [".png", ".jpg", ".jpeg", ".bmp", ".tga"]
+	for ext in common_extensions:
+		var source_texture = obj_dir + "/" + obj_filename + ext
+		var target_texture = "res://" + obj_filename + ext
+		
+		if FileAccess.file_exists(source_texture):
+			print("DEBUG: Found auto-detected texture: ", source_texture)
+			if not FileAccess.file_exists(target_texture):
+				copy_file_to_project(source_texture, target_texture)
+				print("Copied auto-detected texture: " + target_texture)
+
+static func copy_file_to_project(source_path: String, target_path: String):
+	var source_file = FileAccess.open(source_path, FileAccess.READ)
+	if not source_file:
+		print("Failed to open source file: " + source_path)
+		return
+	
+	var target_file = FileAccess.open(target_path, FileAccess.WRITE)
+	if not target_file:
+		print("Failed to create target file: " + target_path)
+		source_file.close()
+		return
+	
+	var buffer = source_file.get_buffer(source_file.get_length())
+	target_file.store_buffer(buffer)
+	
+	source_file.close()
+	target_file.close()
+	
+	print("Successfully copied: " + source_path + " -> " + target_path)
+
+static func sample_texture_color(image: Image, uv: Vector2) -> Color:
+	if not image:
+		return Color.WHITE
+	
+	var width = image.get_width()
+	var height = image.get_height()
+	
+	# Handle UV wrapping
+	var u = fmod(uv.x, 1.0)
+	var v = fmod(uv.y, 1.0)
+	if u < 0: u += 1.0
+	if v < 0: v += 1.0
+	
+	# Convert to pixel coordinates
+	var x = int(u * width) % width
+	var y = int((1.0 - v) * height) % height  # Flip V coordinate
+	
+	return image.get_pixel(x, y)
 
 static func detect_box_shapes(vertices: Array, faces: Array, offset: Vector3) -> Array:
 	var boxes: Array = []
@@ -448,6 +727,7 @@ static func voxelize_face_with_normal(face_vertices: Array) -> Array:
 		int(round(max_pos.z / voxel_size))
 	)
 	
+	
 	# Generate voxels for the area covered by the face
 	# The face vertices define the boundaries, so a face from 0.0 to 0.1 covers exactly 1 voxel
 	
@@ -461,6 +741,7 @@ static func voxelize_face_with_normal(face_vertices: Array) -> Array:
 		for y in range(y_count):
 			for z in range(z_count):
 				var base_voxel_position = Vector3i(min_voxel.x + x, min_voxel.y + y, min_voxel.z + z)
+				
 				
 				# Adjust position based on face normal to place voxel on the solid side
 				# For outward-facing normals, the solid voxel is in the opposite direction
@@ -483,6 +764,7 @@ static func voxelize_face_with_normal(face_vertices: Array) -> Array:
 				elif face_normal.z < 0:
 					# For -Z face, solid voxel is in front, but base_position is already correct
 					pass
+				
 				
 				voxels.append(voxel_position)
 	return voxels
@@ -966,7 +1248,17 @@ static func voxelize_mesh_with_faces(vertices: Array, faces: Array, offset: Vect
 	print("  Voxelizing mesh with ", vertices.size(), " vertices, ", faces.size(), " faces using face-based approach")
 	
 	# Process each face individually using our new face-to-voxel function
-	for face_indices in faces:
+	for face_data in faces:
+		var face_indices = []
+		
+		# Handle both old and new face formats
+		if face_data is Array:
+			# Old format: just vertex indices
+			face_indices = face_data
+		else:
+			# New format: dictionary with vertices, uvs, material
+			face_indices = face_data.get("vertices", [])
+		
 		if face_indices.size() < 3:
 			continue
 		
@@ -999,13 +1291,23 @@ static func voxelize_mesh_with_faces_by_indices(vertices: Array, faces: Array, f
 	# Process each specified face
 	for face_index in face_indices:
 		if face_index < faces.size():
-			var face = faces[face_index]
-			if face.size() < 3:
+			var face_data = faces[face_index]
+			var face_vertex_indices = []
+			
+			# Handle both old and new face formats
+			if face_data is Array:
+				# Old format: just vertex indices
+				face_vertex_indices = face_data
+			else:
+				# New format: dictionary with vertices, uvs, material
+				face_vertex_indices = face_data.get("vertices", [])
+			
+			if face_vertex_indices.size() < 3:
 				continue
 			
 			# Get face vertices and apply offset
 			var face_vertices = []
-			for idx in face:
+			for idx in face_vertex_indices:
 				if idx < vertices.size():
 					face_vertices.append(vertices[idx] + offset)
 			
@@ -1022,6 +1324,117 @@ static func voxelize_mesh_with_faces_by_indices(vertices: Array, faces: Array, f
 	
 	print("  Generated ", voxel_positions.size(), " unique voxels from ", face_indices.size(), " faces")
 	return voxel_positions
+
+static func voxelize_mesh_with_faces_colored(vertices: Array, faces: Array, offset: Vector3, materials: Dictionary, obj_path: String) -> Dictionary:
+	# First, get voxel positions using existing method (without colors)
+	var voxel_positions = voxelize_mesh_with_faces(vertices, faces, offset)
+	
+	# Calculate one color per voxel
+	var voxel_colors = calculate_voxel_colors(voxel_positions, vertices, faces, offset, materials, obj_path)
+	return {"positions": voxel_positions, "colors": voxel_colors}
+
+static func calculate_voxel_colors(voxel_positions: Array, vertices: Array, faces: Array, offset: Vector3, materials: Dictionary, obj_path: String) -> Array:
+	var voxel_colors = []
+	var texture_cache = {}
+	
+	# For each voxel, find the best matching face and sample its color
+	for voxel_pos in voxel_positions:
+		var voxel_world_pos = Vector3(voxel_pos) * 0.1 + Vector3(0.05, 0.05, 0.05)  # Convert to world space at voxel center
+		var best_color = Color.GRAY  # Default fallback color
+		var closest_distance = INF
+		
+		# Find the closest face to this voxel
+		for face_data in faces:
+			var face_vertices = []
+			var face_uvs = []
+			var face_material = ""
+			
+			# Handle both old and new face formats
+			if face_data is Array:
+				# Old format: just vertex indices
+				for idx in face_data:
+					if idx < vertices.size():
+						face_vertices.append(vertices[idx] + offset)
+				face_uvs = []
+				face_material = ""
+			else:
+				# New format: dictionary with vertices, uvs, material
+				for idx in face_data.vertices:
+					if idx < vertices.size():
+						face_vertices.append(vertices[idx] + offset)
+				face_uvs = face_data.get("uvs", [])
+				face_material = face_data.get("material", "")
+			
+			if face_vertices.size() >= 3:
+				# Calculate distance from voxel center to face
+				var face_center = calculate_face_center(face_vertices)
+				var distance = voxel_world_pos.distance_to(face_center)
+				
+				# If this is the closest face so far, use its color
+				if distance < closest_distance:
+					closest_distance = distance
+					best_color = calculate_face_color(face_vertices, face_uvs, face_material, materials, texture_cache, obj_path)
+		
+		voxel_colors.append(best_color)
+		
+	return voxel_colors
+
+static func voxelize_mesh_with_faces_by_indices_colored(vertices: Array, faces: Array, face_indices: Array, offset: Vector3, materials: Dictionary, obj_path: String) -> Dictionary:
+	# First, get voxel positions using existing method (without colors)
+	var voxel_positions = voxelize_mesh_with_faces_by_indices(vertices, faces, face_indices, offset)
+	
+	# Filter faces to only include the specified indices for color calculation
+	var filtered_faces = []
+	for face_index in face_indices:
+		if face_index < faces.size():
+			filtered_faces.append(faces[face_index])
+	
+	# Calculate one color per voxel
+	var voxel_colors = calculate_voxel_colors(voxel_positions, vertices, filtered_faces, offset, materials, obj_path)
+	return {"positions": voxel_positions, "colors": voxel_colors}
+
+static func calculate_face_color(face_vertices: Array, face_uvs: Array, material_name: String, materials: Dictionary, texture_cache: Dictionary, obj_path: String) -> Color:
+	# Return color for a face based on material and texture
+	var default_color = Color.WHITE
+	
+	# If no material, return default
+	if material_name == "" or not material_name in materials:
+		return default_color
+	
+	var material = materials[material_name]
+	var base_color = material.get("diffuse_color", default_color)
+	
+	# If no texture, return base color
+	var texture_path = material.get("texture_path", "")
+	
+	if texture_path == "" or face_uvs.size() == 0:
+		return base_color
+	
+	# Load texture if not in cache
+	if not texture_path in texture_cache:
+		texture_cache[texture_path] = load_texture_from_path(obj_path, texture_path)
+	
+	var texture = texture_cache[texture_path]
+	if not texture:
+		return base_color
+	
+	# Sample texture at face center UV
+	var center_uv = Vector2.ZERO
+	for uv in face_uvs:
+		center_uv += uv
+	center_uv /= face_uvs.size()
+	
+	var texture_color = sample_texture_color(texture, center_uv)
+	
+	# Combine base color with texture color
+	var final_color = Color(
+		base_color.r * texture_color.r,
+		base_color.g * texture_color.g,
+		base_color.b * texture_color.b,
+		base_color.a * texture_color.a
+	)
+	
+	return final_color
 
 # Legacy function - kept for compatibility but now uses new face-based approach
 static func voxelize_mesh(vertices: Array, faces: Array, offset: Vector3) -> Array:
@@ -1081,13 +1494,27 @@ static func create_entity_template_from_obj(file_path: String, template_name: St
 	var root_part_name = find_likely_root_part(part_names, entity_type)
 	
 	for part_name in part_names:
-		var voxel_positions = voxel_parts[part_name]
+		var voxel_data = voxel_parts[part_name]
 		var part_type = guess_part_type(part_name, entity_type)
 		var is_root = (part_name == root_part_name)
 		
+		var voxel_positions: Array = []
 		var colors: Array = []
-		for i in range(voxel_positions.size()):
-			colors.append(get_default_color_for_part_type(part_type))
+		
+		# Handle both old and new voxel data formats
+		if voxel_data is Array:
+			# Old format: just positions
+			voxel_positions = voxel_data
+			for i in range(voxel_positions.size()):
+				colors.append(get_default_color_for_part_type(part_type))
+		else:
+			# New format: dictionary with positions and colors
+			voxel_positions = voxel_data.get("positions", [])
+			colors = voxel_data.get("colors", [])
+			
+			# Fill in missing colors with default
+			while colors.size() < voxel_positions.size():
+				colors.append(get_default_color_for_part_type(part_type))
 		
 		template.add_part_definition(part_name, part_type, voxel_positions, colors, 
 									Vector3.ZERO, is_root)

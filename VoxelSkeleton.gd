@@ -36,9 +36,10 @@ func create_skeleton_from_template(template: EntityTemplate):
 		var part = VoxelPart.new()
 		part.part_name = part_data.name
 		part.part_type = part_data.type
-		part.voxel_positions = part_data.positions.duplicate()
-		part.voxel_colors = part_data.colors.duplicate()
 		part.pivot_offset = part_data.pivot_offset
+		
+		# Use set_voxel_positions to properly initialize both positions and colors
+		part.set_voxel_positions(part_data.positions, part_data.colors)
 		
 		add_part(part)
 		
@@ -82,6 +83,7 @@ func connect_parts(parent_name: String, child_name: String, offset: Vector3 = Ve
 	var parent_part = parts[parent_name]
 	var child_part = parts[child_name]
 	
+	
 	if not parent_name in connections:
 		connections[parent_name] = []
 	
@@ -92,7 +94,16 @@ func connect_parts(parent_name: String, child_name: String, offset: Vector3 = Ve
 	
 	connections[parent_name].append(connection_data)
 	parent_part.attach_child_part(child_part)
-	child_part.position = offset
+	
+	# Snap position to voxel grid (1.0 unit grid to match rendered voxel size)
+	var snapped_offset = Vector3(
+		round(offset.x),
+		round(offset.y),
+		round(offset.z)
+	)
+	
+	print("POSITION_DEBUG: Original offset: ", offset, " -> Snapped: ", snapped_offset)
+	child_part.position = snapped_offset
 	
 	skeleton_changed.emit()
 

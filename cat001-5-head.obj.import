@@ -1,0 +1,22 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://d3ah4epgxqc8"
+path="res://.godot/imported/cat001-5-head.obj-0c6fda4dbc4a6a2c577077d240fcbaab.mesh"
+
+[deps]
+
+files=["res://.godot/imported/cat001-5-head.obj-0c6fda4dbc4a6a2c577077d240fcbaab.mesh"]
+
+source_file="res://cat001-5-head.obj"
+dest_files=["res://.godot/imported/cat001-5-head.obj-0c6fda4dbc4a6a2c577077d240fcbaab.mesh", "res://.godot/imported/cat001-5-head.obj-0c6fda4dbc4a6a2c577077d240fcbaab.mesh"]
+
+[params]
+
+generate_tangents=true
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+optimize_mesh=true
+force_disable_mesh_compression=false

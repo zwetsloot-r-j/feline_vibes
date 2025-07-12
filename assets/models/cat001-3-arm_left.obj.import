@@ -1,0 +1,22 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://cpva6bf24yfjp"
+path="res://.godot/imported/cat001-3-arm_left.obj-f03c57bd6ce2819c8fd5b43d6163db1b.mesh"
+
+[deps]
+
+files=["res://.godot/imported/cat001-3-arm_left.obj-f03c57bd6ce2819c8fd5b43d6163db1b.mesh"]
+
+source_file="res://assets/models/cat001-3-arm_left.obj"
+dest_files=["res://.godot/imported/cat001-3-arm_left.obj-f03c57bd6ce2819c8fd5b43d6163db1b.mesh", "res://.godot/imported/cat001-3-arm_left.obj-f03c57bd6ce2819c8fd5b43d6163db1b.mesh"]
+
+[params]
+
+generate_tangents=true
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+optimize_mesh=true
+force_disable_mesh_compression=false

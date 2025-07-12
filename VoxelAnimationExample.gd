@@ -38,6 +38,11 @@ func _ready():
 	print("Use the UI buttons to switch between entity types and animations")
 	print("You can also import OBJ files to create custom voxel entities")
 	print("Camera controls: Right-click + drag to rotate, scroll wheel to zoom")
+	print("")
+	print("=== ASSETS FOLDER USAGE ===")
+	print("For textures and materials: Place MTL and PNG files in: assets/models/")
+	print("The system will automatically find companion files there.")
+	print("==========================")
 
 func setup_ui_connections():
 	humanoid_btn.pressed.connect(_on_humanoid_pressed)
@@ -224,6 +229,8 @@ func _on_batch_import_pressed():
 func _on_file_selected(path: String):
 	print("Loading OBJ file: ", path)
 	last_imported_file = path
+	
+	# Simply load the OBJ file - companion files should be in assets/models/
 	load_obj_file(path)
 
 func _on_files_selected(paths: PackedStringArray):
@@ -279,8 +286,391 @@ func load_obj_file(file_path: String):
 	else:
 		push_error("Failed to import OBJ file: " + file_path)
 
+func load_obj_file_with_companion_search(temp_file_path: String):
+	print("Loading OBJ file from temporary location with companion search: ", temp_file_path)
+	
+	# First, copy the temporary OBJ file to the project permanently
+	var obj_filename = temp_file_path.get_file()
+	var project_obj_path = "res://" + obj_filename
+	
+	if not FileAccess.file_exists(project_obj_path):
+		var source_file = FileAccess.open(temp_file_path, FileAccess.READ)
+		var target_file = FileAccess.open(project_obj_path, FileAccess.WRITE)
+		if source_file and target_file:
+			target_file.store_buffer(source_file.get_buffer(source_file.get_length()))
+			source_file.close()
+			target_file.close()
+			print("Copied OBJ to project: ", project_obj_path)
+	
+	# Now prompt user for the original directory to find companion files
+	show_companion_file_dialog(project_obj_path)
+
+func show_companion_file_dialog(obj_path: String):
+	# Clean up any previous companion files to avoid confusion
+	clear_previous_companion_files(obj_path)
+	
+	# Create a dialog to ask user for the original directory
+	var dialog = AcceptDialog.new()
+	dialog.title = "Companion Files"
+	
+	var vbox = VBoxContainer.new()
+	var label = Label.new()
+	label.text = "To load textures and materials, please select the original folder containing the MTL and PNG files for this OBJ file.\n\nIMPORTANT: Select files from the ORIGINAL folder, not from temporary copies!"
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(label)
+	
+	var folder_btn = Button.new()
+	folder_btn.text = "Select Original Folder"
+	vbox.add_child(folder_btn)
+	
+	var file_btn = Button.new()
+	file_btn.text = "Select MTL/PNG File in Folder"
+	vbox.add_child(file_btn)
+	
+	var manual_btn = Button.new()
+	manual_btn.text = "Enter Path Manually"
+	vbox.add_child(manual_btn)
+	
+	var skip_btn = Button.new()
+	skip_btn.text = "Skip (Use Default Colors)"
+	vbox.add_child(skip_btn)
+	
+	dialog.add_child(vbox)
+	add_child(dialog)
+	
+	folder_btn.pressed.connect(func(): 
+		dialog.queue_free()
+		show_folder_selection_for_companions(obj_path)
+	)
+	
+	file_btn.pressed.connect(func(): 
+		dialog.queue_free()
+		show_file_selection_for_companions(obj_path)
+	)
+	
+	manual_btn.pressed.connect(func(): 
+		dialog.queue_free()
+		show_manual_path_input(obj_path)
+	)
+	
+	skip_btn.pressed.connect(func(): 
+		dialog.queue_free()
+		load_obj_file(obj_path)
+	)
+	
+	dialog.popup_centered()
+
+func show_folder_selection_for_companions(obj_path: String):
+	# Create a file dialog to select the original folder
+	var folder_dialog = FileDialog.new()
+	folder_dialog.title = "Select Original Folder Containing MTL/PNG Files"
+	folder_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	folder_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	folder_dialog.current_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
+	
+	# Make sure the dialog can show directories
+	folder_dialog.show_hidden_files = false
+	
+	add_child(folder_dialog)
+	
+	# Connect both signals for better compatibility
+	folder_dialog.dir_selected.connect(func(dir: String):
+		print("Selected directory: ", dir)
+		folder_dialog.queue_free()
+		load_obj_with_companion_folder(obj_path, dir)
+	)
+	
+	# Also handle cancel
+	folder_dialog.canceled.connect(func():
+		print("Folder selection canceled")
+		folder_dialog.queue_free()
+		load_obj_file(obj_path)  # Load without companion files
+	)
+	
+	folder_dialog.popup_centered(Vector2i(800, 600))
+
+func show_file_selection_for_companions(obj_path: String):
+	# Alternative approach: select any companion file in the directory
+	var file_dialog = FileDialog.new()
+	file_dialog.title = "Select Any MTL or PNG File in the Original Folder"
+	file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	file_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	file_dialog.current_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
+	
+	# Add filters for common companion file types
+	file_dialog.add_filter("*.mtl", "Material Files")
+	file_dialog.add_filter("*.png", "PNG Images")
+	file_dialog.add_filter("*.jpg", "JPEG Images")
+	file_dialog.add_filter("*.jpeg", "JPEG Images")
+	file_dialog.add_filter("*", "All Files")
+	
+	add_child(file_dialog)
+	
+	file_dialog.file_selected.connect(func(file_path: String):
+		print("=== FILE SELECTION DEBUG ===")
+		print("Selected companion file: ", file_path)
+		print("Raw file path: ", file_path)
+		var companion_dir = file_path.get_base_dir()
+		print("Companion directory: ", companion_dir)
+		print("Directory starts with /run/user/: ", companion_dir.begins_with("/run/user/"))
+		print("Directory starts with /tmp/: ", companion_dir.begins_with("/tmp/"))
+		print("Directory starts with res://: ", companion_dir.begins_with("res://"))
+		
+		# Check if the selected file is in a temporary directory
+		# Be more specific about what constitutes a temporary directory
+		if companion_dir.begins_with("/run/user/") or companion_dir.begins_with("/tmp/"):
+			print("WARNING: Selected file is in temporary directory: ", companion_dir)
+			print("Please select the MTL/PNG file from the ORIGINAL folder, not the temporary copy.")
+			
+			# Show error dialog
+			var error_dialog = AcceptDialog.new()
+			error_dialog.title = "Wrong Directory"
+			error_dialog.dialog_text = "Please select the MTL or PNG file from the ORIGINAL folder where you created/exported your model, not from the temporary copy.\n\nThe file you selected appears to be in a temporary location:\n" + companion_dir + "\n\nTry navigating to your original project folder (like /home/user/Documents/my_project/) and selecting the file from there."
+			add_child(error_dialog)
+			error_dialog.popup_centered()
+			error_dialog.confirmed.connect(func():
+				error_dialog.queue_free()
+				# Show the file dialog again
+				show_file_selection_for_companions(obj_path)
+			)
+			file_dialog.queue_free()
+			return
+		
+		# If it's in the project directory (res://), that might be okay if it's a fresh copy
+		if companion_dir.begins_with("res://"):
+			print("INFO: File is in project directory - this may be okay if it's a fresh copy")
+			# Let it proceed but warn the user
+		
+		print("Proceeding with companion directory: ", companion_dir)
+		file_dialog.queue_free()
+		load_obj_with_companion_folder(obj_path, companion_dir)
+	)
+	
+	file_dialog.canceled.connect(func():
+		print("File selection canceled")
+		file_dialog.queue_free()
+		load_obj_file(obj_path)  # Load without companion files
+	)
+	
+	file_dialog.popup_centered(Vector2i(800, 600))
+
+func show_manual_path_input(obj_path: String):
+	# Create a custom dialog for manual path input
+	var dialog = Window.new()
+	dialog.title = "Enter Original Folder Path"
+	dialog.size = Vector2i(600, 200)
+	dialog.unresizable = false
+	dialog.popup_window = true
+	
+	var vbox = VBoxContainer.new()
+	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	vbox.add_theme_constant_override("separation", 10)
+	
+	# Add some padding
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var label = Label.new()
+	label.text = "Enter the full path to the folder containing your MTL and PNG files:"
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(label)
+	
+	var line_edit = LineEdit.new()
+	line_edit.text = "/home/" + OS.get_environment("USER") + "/Documents/"
+	line_edit.placeholder_text = "e.g. /home/user/Documents/my_project/"
+	vbox.add_child(line_edit)
+	
+	var hint_label = Label.new()
+	hint_label.text = "Tip: This should be the folder where you created/exported your OBJ, MTL, and PNG files."
+	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint_label.add_theme_color_override("font_color", Color.GRAY)
+	vbox.add_child(hint_label)
+	
+	# Add buttons
+	var button_container = HBoxContainer.new()
+	button_container.alignment = BoxContainer.ALIGNMENT_END
+	
+	var cancel_btn = Button.new()
+	cancel_btn.text = "Cancel"
+	button_container.add_child(cancel_btn)
+	
+	var load_btn = Button.new()
+	load_btn.text = "Load Companions"
+	button_container.add_child(load_btn)
+	
+	vbox.add_child(button_container)
+	margin.add_child(vbox)
+	dialog.add_child(margin)
+	add_child(dialog)
+	
+	# Function to handle path processing
+	var process_path = func():
+		var folder_path = line_edit.text.strip_edges()
+		print("Manual path entered: ", folder_path)
+		dialog.queue_free()
+		
+		if DirAccess.dir_exists_absolute(folder_path):
+			load_obj_with_companion_folder(obj_path, folder_path)
+		else:
+			print("ERROR: Directory does not exist: ", folder_path)
+			var error_dialog = AcceptDialog.new()
+			error_dialog.title = "Directory Not Found"
+			error_dialog.dialog_text = "The directory does not exist:\n" + folder_path + "\n\nPlease check the path and try again."
+			add_child(error_dialog)
+			error_dialog.popup_centered()
+			error_dialog.confirmed.connect(func():
+				error_dialog.queue_free()
+				show_manual_path_input(obj_path)  # Try again
+			)
+	
+	# Connect signals
+	load_btn.pressed.connect(process_path)
+	line_edit.text_submitted.connect(func(_text): process_path.call())
+	
+	cancel_btn.pressed.connect(func():
+		dialog.queue_free()
+		load_obj_file(obj_path)  # Load without companion files
+	)
+	
+	dialog.close_requested.connect(func():
+		dialog.queue_free()
+		load_obj_file(obj_path)  # Load without companion files
+	)
+	
+	dialog.popup_centered()
+	line_edit.grab_focus()
+
+func load_obj_with_companion_folder(obj_path: String, companion_dir: String):
+	print("=== COMPANION FILE LOADING ===")
+	print("Loading OBJ with companion files from: ", companion_dir)
+	print("OBJ path: ", obj_path)
+	
+	var obj_filename = obj_path.get_file().get_basename()
+	print("OBJ filename (no extension): ", obj_filename)
+	
+	# List all files in the companion directory for debugging
+	print("Files in companion directory:")
+	var dir = DirAccess.open(companion_dir)
+	if dir:
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			print("  - ", file_name)
+			file_name = dir.get_next()
+		dir.list_dir_end()
+	
+	# Look for MTL file
+	var mtl_path = companion_dir + "/" + obj_filename + ".mtl"
+	print("Looking for MTL at: ", mtl_path)
+	if FileAccess.file_exists(mtl_path):
+		print("Found MTL file!")
+		var target_mtl = "res://" + obj_filename + ".mtl"
+		if not FileAccess.file_exists(target_mtl):
+			VoxelMeshLoader.copy_file_to_project(mtl_path, target_mtl)
+			print("Copied MTL file: ", target_mtl)
+		else:
+			print("MTL file already exists in project")
+	else:
+		print("MTL file not found")
+	
+	# Look for common texture files
+	print("Looking for texture files...")
+	var texture_extensions = [".png", ".jpg", ".jpeg", ".bmp", ".tga"]
+	for ext in texture_extensions:
+		var texture_path = companion_dir + "/" + obj_filename + ext
+		print("  Checking: ", texture_path)
+		if FileAccess.file_exists(texture_path):
+			print("  Found texture: ", texture_path)
+			var target_texture = "res://" + obj_filename + ext
+			if not FileAccess.file_exists(target_texture):
+				VoxelMeshLoader.copy_file_to_project(texture_path, target_texture)
+				print("  Copied texture file: ", target_texture)
+			else:
+				print("  Texture already exists in project")
+		else:
+			print("  Not found: ", texture_path)
+	
+	# Also look for ANY PNG/JPG files in the directory that might be textures
+	print("Looking for any texture files in directory...")
+	if dir:
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			var lower_name = file_name.to_lower()
+			if lower_name.ends_with(".png") or lower_name.ends_with(".jpg") or lower_name.ends_with(".jpeg"):
+				print("  Found potential texture: ", file_name)
+				var source_path = companion_dir + "/" + file_name
+				var target_path = "res://" + file_name
+				if not FileAccess.file_exists(target_path):
+					VoxelMeshLoader.copy_file_to_project(source_path, target_path)
+					print("  Copied potential texture: ", target_path)
+				else:
+					print("  Potential texture already exists in project")
+			file_name = dir.get_next()
+		dir.list_dir_end()
+	
+	# Load MTL file if exists and copy any referenced textures
+	var project_mtl_path = "res://" + obj_filename + ".mtl"
+	print("Checking for project MTL: ", project_mtl_path)
+	if FileAccess.file_exists(project_mtl_path):
+		print("Loading MTL to find referenced textures...")
+		var materials = VoxelMeshLoader.load_mtl_file(project_mtl_path)
+		print("Found materials: ", materials.keys())
+		for material_name in materials:
+			var material = materials[material_name]
+			var texture_file = material.get("texture_path", "")
+			if texture_file != "":
+				print("Material ", material_name, " references texture: ", texture_file)
+				var source_texture = companion_dir + "/" + texture_file
+				var target_texture = "res://" + texture_file
+				print("  Source: ", source_texture)
+				print("  Target: ", target_texture)
+				if FileAccess.file_exists(source_texture):
+					if not FileAccess.file_exists(target_texture):
+						VoxelMeshLoader.copy_file_to_project(source_texture, target_texture)
+						print("  Copied referenced texture: ", target_texture)
+					else:
+						print("  Referenced texture already exists in project")
+				else:
+					print("  Referenced texture not found at source")
+	else:
+		print("No MTL file found in project")
+	
+	print("=== LOADING OBJ WITH MATERIALS ===")
+	# Now load the OBJ file normally
+	load_obj_file(obj_path)
+
+func clear_previous_companion_files(obj_path: String):
+	# Remove any previously copied companion files to avoid confusion
+	var obj_filename = obj_path.get_file().get_basename()
+	
+	var files_to_remove = [
+		"res://" + obj_filename + ".mtl",
+		"res://" + obj_filename + ".png",
+		"res://" + obj_filename + ".jpg",
+		"res://" + obj_filename + ".jpeg",
+		"res://" + obj_filename + ".bmp",
+		"res://" + obj_filename + ".tga"
+	]
+	
+	var dir = DirAccess.open("res://")
+	if dir:
+		for file_path in files_to_remove:
+			var filename = file_path.get_file()
+			if FileAccess.file_exists(file_path):
+				var result = dir.remove(filename)
+				if result == OK:
+					print("Removed previous companion file: ", file_path)
+				else:
+					print("Failed to remove file: ", file_path)
+
 func load_multiple_obj_files(file_paths: PackedStringArray):
-	print("Loading multiple OBJ files...")
+	print("POSITION_DEBUG: Loading multiple OBJ files...")
+	print("POSITION_DEBUG: Files to load: ", file_paths)
 	
 	var template = EntityTemplate.new()
 	template.template_name = "BatchImported"
@@ -293,50 +683,130 @@ func load_multiple_obj_files(file_paths: PackedStringArray):
 		var filename = file_path.get_file().get_basename()
 		var part_name = map_filename_to_part_name(filename)
 		
-		print("Processing file: ", filename, " -> part: ", part_name)
+		print("POSITION_DEBUG: Processing file: ", filename, " -> part: ", part_name)
 		
 		var obj_data = VoxelMeshLoader.load_obj_file(file_path)
 		if obj_data.is_empty():
-			print("ERROR: Failed to load ", file_path)
+			print("POSITION_DEBUG: ERROR: Failed to load ", file_path)
 			continue
 			
-		print("  OBJ vertices: ", obj_data.vertices.size(), " faces: ", obj_data.faces.size())
+		print("POSITION_DEBUG:   OBJ vertices: ", obj_data.vertices.size(), " faces: ", obj_data.faces.size())
 		if obj_data.vertices.size() > 0:
-			print("    First few vertices: ", obj_data.vertices.slice(0, min(4, obj_data.vertices.size())))
+			print("POSITION_DEBUG:     First few vertices: ", obj_data.vertices.slice(0, min(4, obj_data.vertices.size())))
+			var bounds = VoxelMeshLoader.calculate_bounds(obj_data.vertices)
+			print("POSITION_DEBUG:     STAGE 1 (OBJ) - Mesh bounds: ", bounds)
+			print("POSITION_DEBUG:     STAGE 1 (OBJ) - Mesh center: ", bounds.get_center())
+			print("POSITION_DEBUG:     STAGE 1 (OBJ) - Mesh min: ", bounds.position)
+			print("POSITION_DEBUG:     STAGE 1 (OBJ) - Mesh max: ", bounds.end)
 		
 		var voxel_parts = VoxelMeshLoader.convert_obj_to_voxels(obj_data, false)
-		if "main" in voxel_parts and voxel_parts["main"].size() > 0:
+		if "main" in voxel_parts:
+			var voxel_data = voxel_parts["main"]
 			var part_type = guess_part_type_from_name(part_name)
-			var colors = []
-			for i in range(voxel_parts["main"].size()):
-				colors.append(get_color_for_part_type(part_type))
 			
-			template.add_part_definition(part_name, part_type, voxel_parts["main"], colors, 
-										Vector3.ZERO, part_name == "torso" or part_name == "body")
+			var voxel_positions: Array = []
+			var colors: Array = []
 			
-			print("  Added part '", part_name, "' with ", voxel_parts["main"].size(), " voxels")
-			print("    Voxel positions: ", voxel_parts["main"])
+			# Handle both old and new voxel data formats
+			if voxel_data is Array:
+				# Old format: just positions
+				voxel_positions = voxel_data
+				for i in range(voxel_positions.size()):
+					colors.append(get_color_for_part_type(part_type))
+			else:
+				# New format: dictionary with positions and colors
+				voxel_positions = voxel_data.get("positions", [])
+				colors = voxel_data.get("colors", [])
+				
+				# Fill in missing colors with default
+				while colors.size() < voxel_positions.size():
+					colors.append(get_color_for_part_type(part_type))
+			
+			if voxel_positions.size() > 0:
+				# Calculate bounds of voxel positions for position debugging
+				var voxel_bounds = calculate_voxel_bounds(voxel_positions)
+				print("POSITION_DEBUG:     STAGE 2 (VOXELS) - Voxel bounds: ", voxel_bounds)
+				print("POSITION_DEBUG:     STAGE 2 (VOXELS) - Voxel center: ", voxel_bounds.get_center())
+				print("POSITION_DEBUG:     STAGE 2 (VOXELS) - Voxel min: ", voxel_bounds.position)
+				print("POSITION_DEBUG:     STAGE 2 (VOXELS) - Voxel max: ", voxel_bounds.end)
+				
+				# Compare Stage 1 vs Stage 2
+				if obj_data.vertices.size() > 0:
+					var mesh_bounds = VoxelMeshLoader.calculate_bounds(obj_data.vertices)
+					var center_difference = voxel_bounds.get_center() - mesh_bounds.get_center()
+					print("POSITION_DEBUG:     CENTER SHIFT (OBJ->Voxel): ", center_difference)
+					print("POSITION_DEBUG:     CENTER SHIFT MAGNITUDE: ", center_difference.length())
+				
+				template.add_part_definition(part_name, part_type, voxel_positions, colors, 
+											Vector3.ZERO, part_name == "torso" or part_name == "body")
+				
+				print("POSITION_DEBUG:   Added part '", part_name, "' with ", voxel_positions.size(), " voxels")
+				print("POSITION_DEBUG:     Sample voxel positions (grid coords): ", voxel_positions.slice(0, min(3, voxel_positions.size())))
+			else:
+				print("  WARNING: No voxels generated for ", part_name)
 		else:
-			print("  WARNING: No voxels generated for ", part_name)
+			print("  WARNING: No main part found for ", part_name)
 	
 	# Auto-generate connections based on entity type
 	auto_connect_parts(template)
 	
 	if template.validate_template():
+		print("POSITION_DEBUG: Creating skeleton from template with ", template.part_definitions.size(), " parts")
+		
+		# Debug part positions before skeleton creation
+		for part_def in template.part_definitions:
+			print("POSITION_DEBUG:   Part '", part_def.name, "': ", part_def.positions.size(), " voxels, pivot: ", part_def.pivot_offset)
+		
 		voxel_skeleton.create_skeleton_from_template(template)
 		animation_system.skeleton = voxel_skeleton
 		constraint_system.skeleton = voxel_skeleton
 		
+		# Debug actual part positions after skeleton creation
+		print("POSITION_DEBUG: Skeleton created - checking part positions:")
+		for part_name in voxel_skeleton.parts.keys():
+			var part = voxel_skeleton.parts[part_name]
+			var part_bounds = part.get_bounds()
+			var part_world_center = part.global_position + part_bounds.get_center()
+			
+			print("POSITION_DEBUG:   STAGE 3 (CONNECTED) - Part '", part_name, "':")
+			print("POSITION_DEBUG:     Local position: ", part.position)
+			print("POSITION_DEBUG:     Global position: ", part.global_position)
+			print("POSITION_DEBUG:     Part bounds: ", part_bounds)
+			print("POSITION_DEBUG:     Part world center: ", part_world_center)
+			
+			# Try to find the original voxel data for comparison
+			for part_def in template.part_definitions:
+				if part_def.name == part_name:
+					var original_voxel_bounds = calculate_voxel_bounds(part_def.positions)
+					var original_center = original_voxel_bounds.get_center()
+					var final_center_shift = part_world_center - original_center
+					print("POSITION_DEBUG:     CENTER SHIFT (Voxel->Connected): ", final_center_shift)
+					print("POSITION_DEBUG:     FINAL CENTER SHIFT MAGNITUDE: ", final_center_shift.length())
+					break
+		
 		animation_system.create_default_animations_for_entity_type(current_entity_type)
 		constraint_system.setup_default_constraints_for_entity_type(current_entity_type)
 		
-		print("Successfully imported ", template.part_definitions.size(), " parts from multiple OBJ files")
+		print("POSITION_DEBUG: ===============================")
+		print("POSITION_DEBUG: POSITION ANALYSIS SUMMARY")
+		print("POSITION_DEBUG: ===============================")
+		print("POSITION_DEBUG: Successfully imported ", template.part_definitions.size(), " parts from multiple OBJ files")
+		
+		# Final summary of all part positions
+		for part_name in voxel_skeleton.parts.keys():
+			var part = voxel_skeleton.parts[part_name]
+			var part_bounds = part.get_bounds()
+			var part_world_center = part.global_position + part_bounds.get_center()
+			print("POSITION_DEBUG: FINAL POSITION - '", part_name, "': ", part_world_center)
+		
+		print("POSITION_DEBUG: ===============================")
 		
 		# Auto-adjust camera distance based on model size
 		auto_adjust_camera_for_model()
 		
 		# animation_system.play_animation("idle", true)  # Disabled to test positioning
 	else:
+		print("POSITION_DEBUG: Template validation failed")
 		push_error("Failed to create valid template from multiple OBJ files")
 
 func map_filename_to_part_name(filename: String) -> String:
@@ -409,31 +879,41 @@ func auto_connect_parts(template: EntityTemplate):
 	if not root_part:
 		return
 	
-	# Basic connection rules based on entity type
+	print("POSITION_DEBUG: Using OBJ-based positioning instead of hardcoded offsets")
+	
+	# Instead of hardcoded offsets, use the original mesh positions
+	# Each part should maintain its position relative to the root part
+	var root_bounds = calculate_voxel_bounds(root_part.positions)
+	var root_center = root_bounds.get_center()
+	
+	print("POSITION_DEBUG: Root part center: ", root_center)
+	
 	for part_def in template.part_definitions:
 		if part_def == root_part:
 			continue
 			
-		var offset = Vector3.ZERO
-		match part_def.name:
-			"head":
-				offset = Vector3(0, 2, 0)
-			"arm_left":
-				offset = Vector3(-1.5, 1, 0)
-			"arm_right":
-				offset = Vector3(1.5, 1, 0)
-			"leg_left":
-				offset = Vector3(-0.5, -1.5, 0)
-			"leg_right":
-				offset = Vector3(0.5, -1.5, 0)
-			"tail":
-				offset = Vector3(0, 0, -1)
-			"wing_left":
-				offset = Vector3(-1, 0.5, 0)
-			"wing_right":
-				offset = Vector3(1, 0.5, 0)
+		# Calculate offset based on original mesh position relative to root
+		var part_bounds = calculate_voxel_bounds(part_def.positions)
+		var part_center = part_bounds.get_center()
+		var relative_offset = part_center - root_center
 		
-		template.add_connection(root_part.name, part_def.name, offset)
+		print("POSITION_DEBUG: Part '", part_def.name, "' center: ", part_center, " offset: ", relative_offset)
+		
+		template.add_connection(root_part.name, part_def.name, relative_offset)
+
+func calculate_voxel_bounds(voxel_positions: Array) -> AABB:
+	if voxel_positions.is_empty():
+		return AABB()
+	
+	var min_pos = Vector3(voxel_positions[0]) * 0.1  # Convert first to world units
+	var max_pos = Vector3(voxel_positions[0]) * 0.1  # Convert first to world units
+	
+	for pos in voxel_positions:
+		var v_pos = Vector3(pos) * 0.1  # Convert to world units
+		min_pos = min_pos.min(v_pos)
+		max_pos = max_pos.max(v_pos)
+	
+	return AABB(min_pos, max_pos - min_pos)
 
 func auto_adjust_camera_for_model():
 	if not voxel_skeleton:
