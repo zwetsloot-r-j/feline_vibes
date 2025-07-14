@@ -1,7 +1,6 @@
-[gd_scene load_steps=3 format=3 uid="uid://b8x7qwerty123"]
+[gd_scene load_steps=2 format=3 uid="uid://b8x7qwerty123"]
 
 [ext_resource type="Script" path="res://Player.gd" id="1_player"]
-[ext_resource type="PackedScene" uid="uid://c0mo8tek77du4" path="res://CharacterSkin.tscn" id="2_character_skin"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 radius = 0.5
@@ -13,5 +12,3 @@ script = ExtResource("1_player")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
 shape = SubResource("CapsuleShape3D_1")
-
-[node name="CharacterSkin" parent="." instance=ExtResource("2_character_skin")]

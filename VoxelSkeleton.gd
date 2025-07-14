@@ -87,20 +87,20 @@ func connect_parts(parent_name: String, child_name: String, offset: Vector3 = Ve
 	if not parent_name in connections:
 		connections[parent_name] = []
 	
-	var connection_data = {
-		"child_name": child_name,
-		"offset": offset
-	}
-	
-	connections[parent_name].append(connection_data)
-	parent_part.attach_child_part(child_part)
-	
 	# Snap position to voxel grid (1.0 unit grid to match rendered voxel size)
 	var snapped_offset = Vector3(
 		round(offset.x),
 		round(offset.y),
 		round(offset.z)
 	)
+	
+	var connection_data = {
+		"child_name": child_name,
+		"offset": snapped_offset  # Store the snapped offset instead of original
+	}
+	
+	connections[parent_name].append(connection_data)
+	parent_part.attach_child_part(child_part)
 	
 	print("POSITION_DEBUG: Original offset: ", offset, " -> Snapped: ", snapped_offset)
 	child_part.position = snapped_offset
@@ -301,6 +301,37 @@ func save_skeleton_to_file(file_path: String):
 	file.store_string(JSON.stringify(data))
 	file.close()
 
+func get_available_models() -> Array:
+	var models = []
+	var dir = DirAccess.open("res://models/")
+	if dir:
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			if file_name.ends_with(".json"):
+				models.append("res://models/" + file_name)
+			file_name = dir.get_next()
+		dir.list_dir_end()
+	return models
+
+func parse_vector3_from_json(json_data) -> Vector3:
+	# Handle different JSON representations of Vector3
+	if json_data is Dictionary:
+		# JSON object with x, y, z properties
+		return Vector3(json_data.get("x", 0.0), json_data.get("y", 0.0), json_data.get("z", 0.0))
+	elif json_data is Array and json_data.size() >= 3:
+		# JSON array [x, y, z]
+		return Vector3(json_data[0], json_data[1], json_data[2])
+	elif json_data is String:
+		# JSON string representation like "(1, 2, 3)"
+		var clean_str = json_data.strip_edges().trim_prefix("(").trim_suffix(")")
+		var parts = clean_str.split(",")
+		if parts.size() >= 3:
+			return Vector3(parts[0].to_float(), parts[1].to_float(), parts[2].to_float())
+	
+	# Fallback to zero vector
+	return Vector3.ZERO
+
 func load_skeleton_from_file(file_path: String) -> bool:
 	if not FileAccess.file_exists(file_path):
 		push_error("Skeleton file not found: " + file_path)
@@ -327,11 +358,56 @@ func load_skeleton_from_file(file_path: String) -> bool:
 		var part = VoxelPart.new()
 		part.part_name = part_data.part_name
 		part.part_type = part_data.part_type
-		part.voxel_positions = part_data.voxel_positions
-		part.voxel_colors = part_data.voxel_colors
-		part.pivot_offset = part_data.pivot_offset
-		part.position = Vector3(part_data.position.x, part_data.position.y, part_data.position.z)
-		part.rotation = Vector3(part_data.rotation.x, part_data.rotation.y, part_data.rotation.z)
+		# Convert voxel positions from JSON arrays to Vector3 objects
+		var converted_positions = []
+		for pos_data in part_data.voxel_positions:
+			converted_positions.append(parse_vector3_from_json(pos_data))
+		
+		# Convert color data if needed
+		var converted_colors = []
+		for color_data in part_data.voxel_colors:
+			if color_data is Dictionary:
+				# Color stored as dictionary with r, g, b, a
+				converted_colors.append(Color(
+					color_data.get("r", 1.0),
+					color_data.get("g", 1.0), 
+					color_data.get("b", 1.0),
+					color_data.get("a", 1.0)
+				))
+			elif color_data is Array and color_data.size() >= 3:
+				# Color stored as array [r, g, b, a]
+				converted_colors.append(Color(
+					color_data[0],
+					color_data[1], 
+					color_data[2],
+					color_data[3] if color_data.size() >= 4 else 1.0
+				))
+			elif color_data is String:
+				# Color stored as string like "(0.2667, 0.2667, 0.2667, 1)"
+				var clean_str = color_data.strip_edges().trim_prefix("(").trim_suffix(")")
+				var parts = clean_str.split(",")
+				if parts.size() >= 3:
+					converted_colors.append(Color(
+						parts[0].to_float(),
+						parts[1].to_float(), 
+						parts[2].to_float(),
+						parts[3].to_float() if parts.size() >= 4 else 1.0
+					))
+				else:
+					converted_colors.append(Color.WHITE)
+			else:
+				# Assume it's already a proper color or default to white
+				converted_colors.append(Color.WHITE)
+		
+		# Set pivot offset first so it doesn't get overridden
+		part.pivot_offset = parse_vector3_from_json(part_data.pivot_offset)
+		
+		# Use set_voxel_positions to properly apply both positions and colors
+		part.set_voxel_positions(converted_positions, converted_colors)
+		
+		# Set transform properties
+		part.position = parse_vector3_from_json(part_data.position)
+		part.rotation = parse_vector3_from_json(part_data.rotation)
 		
 		add_part(part)
 		
@@ -345,7 +421,7 @@ func load_skeleton_from_file(file_path: String) -> bool:
 			var parent_part = parts[parent_name]
 			var child_part = parts[connection.child_name]
 			parent_part.attach_child_part(child_part)
-			child_part.position = connection.offset
+			child_part.position = parse_vector3_from_json(connection.offset)
 	
 	skeleton_changed.emit()
 	return true

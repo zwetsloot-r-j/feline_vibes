@@ -31,6 +31,9 @@ var generated_chunks: Dictionary = {}  # Track which chunks have voxel data gene
 
 # Chunk generation queue for frame-limited processing
 var chunk_generation_queue: Array[Vector3i] = []
+var initial_generation_complete: bool = false
+
+signal initial_map_generation_complete
 
 # Performance tracking
 var performance_stats: Dictionary = {
@@ -89,6 +92,41 @@ func process_chunk_generation_queue():
 		
 	if chunk_generation_queue.size() > 0:
 		print("Chunk queue remaining: ", chunk_generation_queue.size(), " chunks")
+	elif not initial_generation_complete and generate_on_start:
+		# Check if we have enough active chunks around the player before declaring complete
+		check_initial_generation_complete()
+
+func check_initial_generation_complete():
+	if not player:
+		return
+	
+	# Check if we have enough chunks with collision around the player
+	var player_chunk = get_chunk_coord(player.global_position)
+	var required_chunks_radius = 2  # Need at least 2 chunks radius around player
+	var chunks_with_collision = 0
+	var total_required_chunks = 0
+	
+	# Check chunks in a radius around the player
+	for x in range(player_chunk.x - required_chunks_radius, player_chunk.x + required_chunks_radius + 1):
+		for z in range(player_chunk.z - required_chunks_radius, player_chunk.z + required_chunks_radius + 1):
+			# Only check chunks at or below player level (collision important for landing)
+			for y in range(player_chunk.y - 1, player_chunk.y + 2):
+				var chunk_coord = Vector3i(x, y, z)
+				total_required_chunks += 1
+				
+				# Check if this chunk is active (has collision)
+				if chunk_coord in active_chunks:
+					chunks_with_collision += 1
+	
+	print("DEBUG: Initial generation check - chunks with collision: ", chunks_with_collision, "/", total_required_chunks)
+	
+	# Require at least 80% of nearby chunks to be active with collision
+	var completion_threshold = int(total_required_chunks * 0.8)
+	if chunks_with_collision >= completion_threshold:
+		initial_generation_complete = true
+		print("=== INITIAL MAP GENERATION COMPLETE ===")
+		print("Active chunks around player: ", chunks_with_collision, "/", total_required_chunks)
+		initial_map_generation_complete.emit()
 
 func setup_noise():
 	noise = FastNoiseLite.new()
@@ -273,16 +311,36 @@ func get_chunks_in_range() -> Array[Vector3i]:
 	
 	var chunks: Array[Vector3i] = []
 	var player_chunk = get_chunk_coord(player.global_position)
-	var chunk_render_distance = int(render_distance / (chunk_size * voxel_size)) + 1
+	var base_chunk_distance = int(render_distance / (chunk_size * voxel_size)) + 1
 	
-	for x in range(player_chunk.x - chunk_render_distance, player_chunk.x + chunk_render_distance + 1):
-		for y in range(player_chunk.y - chunk_render_distance, player_chunk.y + chunk_render_distance + 1):
-			for z in range(player_chunk.z - chunk_render_distance, player_chunk.z + chunk_render_distance + 1):
+	# Asymmetric rendering based on camera view direction
+	# Camera looks toward negative Z (north) and downward, so we want:
+	# - More chunks north (-Z) and up (+Y) toward horizon
+	# - Fewer chunks south (+Z) and down (-Y) away from camera view
+	var x_range = base_chunk_distance
+	var y_up_range = int(base_chunk_distance * 1.5)    # 50% more chunks upward (horizon)
+	var y_down_range = int(base_chunk_distance * 0.7)  # 30% fewer chunks downward (ground)
+	var z_north_range = int(base_chunk_distance * 1.4)  # 40% more chunks north (-Z direction)
+	var z_south_range = int(base_chunk_distance * 0.6)  # 40% fewer chunks south (+Z direction)
+	
+	for x in range(player_chunk.x - x_range, player_chunk.x + x_range + 1):
+		for y in range(player_chunk.y - y_down_range, player_chunk.y + y_up_range + 1):
+			for z in range(player_chunk.z - z_north_range, player_chunk.z + z_south_range + 1):
 				var chunk_coord = Vector3i(x, y, z)
 				var chunk_world_pos = Vector3(x * chunk_size * voxel_size, y * chunk_size * voxel_size, z * chunk_size * voxel_size)
 				
-				# Check if chunk is within render distance
-				if chunk_world_pos.distance_to(player.global_position) <= render_distance + chunk_size * voxel_size:
+				# Use asymmetric distance check based on direction
+				var offset_from_player = chunk_world_pos - player.global_position
+				var distance_limit = render_distance
+				
+				# Increase distance limit for north/upward chunks (toward horizon)
+				if offset_from_player.z < 0 or offset_from_player.y > 0:
+					distance_limit *= 1.3  # 30% more distance for north/horizon chunks
+				# Decrease distance limit for south/downward chunks (away from camera)
+				elif offset_from_player.z > 0 or offset_from_player.y < -5:
+					distance_limit *= 0.7  # 30% less distance for south/underground chunks
+				
+				if chunk_world_pos.distance_to(player.global_position) <= distance_limit + chunk_size * voxel_size:
 					chunks.append(chunk_coord)
 	
 	return chunks

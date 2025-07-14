@@ -21,6 +21,15 @@ extends Node3D
 var current_entity_type: VoxelSkeleton.EntityType = VoxelSkeleton.EntityType.HUMANOID
 var last_imported_file: String = ""
 
+# Part manipulation variables
+var selected_part: VoxelPart = null
+var part_manipulation_ui: Control = null
+var part_selector: OptionButton = null
+var position_controls: Dictionary = {}
+var rotation_controls: Dictionary = {}
+var pivot_controls: Dictionary = {}
+var pivot_marker: MeshInstance3D = null
+
 # Camera control variables
 var camera_distance: float = 10.0
 var camera_angle_h: float = 0.0
@@ -60,12 +69,173 @@ func setup_ui_connections():
 	batch_btn.text = "Load Multiple OBJ Files"
 	batch_btn.pressed.connect(_on_batch_import_pressed)
 	$UI/VBoxContainer.add_child(batch_btn)
+	
+	# Add separator
+	var separator = HSeparator.new()
+	$UI/VBoxContainer.add_child(separator)
+	
+	# Add model save/load section
+	var model_label = Label.new()
+	model_label.text = "Model Save/Load:"
+	$UI/VBoxContainer.add_child(model_label)
+	
+	var save_load_buttons = HBoxContainer.new()
+	
+	var save_btn = Button.new()
+	save_btn.text = "Save Model"
+	save_btn.pressed.connect(_on_save_model_pressed)
+	save_load_buttons.add_child(save_btn)
+	
+	var load_btn = Button.new()
+	load_btn.text = "Load Model"
+	load_btn.pressed.connect(_on_load_model_pressed)
+	save_load_buttons.add_child(load_btn)
+	
+	$UI/VBoxContainer.add_child(save_load_buttons)
+	
+	# Add part manipulation UI
+	setup_part_manipulation_ui()
+	
 	file_dialog.file_selected.connect(_on_file_selected)
 	file_dialog.files_selected.connect(_on_files_selected)
 	
 	animation_system.animation_started.connect(_on_animation_started)
 	animation_system.animation_finished.connect(_on_animation_finished)
 	constraint_system.constraint_violated.connect(_on_constraint_violated)
+
+func setup_part_manipulation_ui():
+	# Create part manipulation section
+	var separator = HSeparator.new()
+	$UI/VBoxContainer.add_child(separator)
+	
+	var part_label = Label.new()
+	part_label.text = "Part Manipulation:"
+	$UI/VBoxContainer.add_child(part_label)
+	
+	# Part selector dropdown
+	part_selector = OptionButton.new()
+	part_selector.add_item("Select Part...")
+	part_selector.item_selected.connect(_on_part_selected)
+	$UI/VBoxContainer.add_child(part_selector)
+	
+	# Create collapsible manipulation controls
+	part_manipulation_ui = VBoxContainer.new()
+	part_manipulation_ui.visible = false
+	$UI/VBoxContainer.add_child(part_manipulation_ui)
+	
+	# Position controls
+	var pos_label = Label.new()
+	pos_label.text = "Position:"
+	part_manipulation_ui.add_child(pos_label)
+	
+	for axis in ["X", "Y", "Z"]:
+		var hbox = HBoxContainer.new()
+		var label = Label.new()
+		label.text = axis + ":"
+		label.custom_minimum_size.x = 30
+		hbox.add_child(label)
+		
+		var minus_btn = Button.new()
+		minus_btn.text = "-"
+		minus_btn.custom_minimum_size = Vector2(30, 30)
+		minus_btn.pressed.connect(_on_position_changed.bind(axis.to_lower(), -1))
+		hbox.add_child(minus_btn)
+		
+		var value_label = Label.new()
+		value_label.text = "0.0"
+		value_label.custom_minimum_size.x = 50
+		value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hbox.add_child(value_label)
+		position_controls[axis.to_lower()] = value_label
+		
+		var plus_btn = Button.new()
+		plus_btn.text = "+"
+		plus_btn.custom_minimum_size = Vector2(30, 30)
+		plus_btn.pressed.connect(_on_position_changed.bind(axis.to_lower(), 1))
+		hbox.add_child(plus_btn)
+		
+		part_manipulation_ui.add_child(hbox)
+	
+	# Rotation controls
+	var rot_label = Label.new()
+	rot_label.text = "Rotation (degrees):"
+	part_manipulation_ui.add_child(rot_label)
+	
+	for axis in ["X", "Y", "Z"]:
+		var hbox = HBoxContainer.new()
+		var label = Label.new()
+		label.text = axis + ":"
+		label.custom_minimum_size.x = 30
+		hbox.add_child(label)
+		
+		var minus_btn = Button.new()
+		minus_btn.text = "-15°"
+		minus_btn.custom_minimum_size = Vector2(40, 30)
+		minus_btn.pressed.connect(_on_rotation_changed.bind(axis.to_lower(), -15))
+		hbox.add_child(minus_btn)
+		
+		var value_label = Label.new()
+		value_label.text = "0°"
+		value_label.custom_minimum_size.x = 50
+		value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hbox.add_child(value_label)
+		rotation_controls[axis.to_lower()] = value_label
+		
+		var plus_btn = Button.new()
+		plus_btn.text = "+15°"
+		plus_btn.custom_minimum_size = Vector2(40, 30)
+		plus_btn.pressed.connect(_on_rotation_changed.bind(axis.to_lower(), 15))
+		hbox.add_child(plus_btn)
+		
+		part_manipulation_ui.add_child(hbox)
+	
+	# Pivot controls
+	var pivot_label = Label.new()
+	pivot_label.text = "Pivot Offset:"
+	part_manipulation_ui.add_child(pivot_label)
+	
+	for axis in ["X", "Y", "Z"]:
+		var hbox = HBoxContainer.new()
+		var label = Label.new()
+		label.text = axis + ":"
+		label.custom_minimum_size.x = 30
+		hbox.add_child(label)
+		
+		var minus_btn = Button.new()
+		minus_btn.text = "-"
+		minus_btn.custom_minimum_size = Vector2(30, 30)
+		minus_btn.pressed.connect(_on_pivot_changed.bind(axis.to_lower(), -0.5))
+		hbox.add_child(minus_btn)
+		
+		var value_label = Label.new()
+		value_label.text = "0.0"
+		value_label.custom_minimum_size.x = 50
+		value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hbox.add_child(value_label)
+		pivot_controls[axis.to_lower()] = value_label
+		
+		var plus_btn = Button.new()
+		plus_btn.text = "+"
+		plus_btn.custom_minimum_size = Vector2(30, 30)
+		plus_btn.pressed.connect(_on_pivot_changed.bind(axis.to_lower(), 0.5))
+		hbox.add_child(plus_btn)
+		
+		part_manipulation_ui.add_child(hbox)
+	
+	# Control buttons
+	var button_container = HBoxContainer.new()
+	
+	var reset_btn = Button.new()
+	reset_btn.text = "Reset Part"
+	reset_btn.pressed.connect(_on_reset_part)
+	button_container.add_child(reset_btn)
+	
+	var center_pivot_btn = Button.new()
+	center_pivot_btn.text = "Center Pivot"
+	center_pivot_btn.pressed.connect(_on_center_pivot)
+	button_container.add_child(center_pivot_btn)
+	
+	part_manipulation_ui.add_child(button_container)
 
 func setup_camera_controls():
 	# Add camera control UI
@@ -175,6 +345,9 @@ func create_skeleton_for_entity_type(entity_type: VoxelSkeleton.EntityType):
 		animation_system.skeleton = voxel_skeleton
 		constraint_system.skeleton = voxel_skeleton
 		
+		# Refresh the part selector dropdown
+		refresh_part_selector()
+		
 		animation_system.create_default_animations_for_entity_type(entity_type)
 		
 		constraint_system.setup_default_constraints_for_entity_type(entity_type)
@@ -270,6 +443,9 @@ func load_obj_file(file_path: String):
 		voxel_skeleton.create_skeleton_from_template(template)
 		animation_system.skeleton = voxel_skeleton
 		constraint_system.skeleton = voxel_skeleton
+		
+		# Refresh the part selector dropdown
+		refresh_part_selector()
 		
 		animation_system.create_default_animations_for_entity_type(current_entity_type)
 		constraint_system.setup_default_constraints_for_entity_type(current_entity_type)
@@ -761,6 +937,9 @@ func load_multiple_obj_files(file_paths: PackedStringArray):
 		animation_system.skeleton = voxel_skeleton
 		constraint_system.skeleton = voxel_skeleton
 		
+		# Refresh the part selector dropdown
+		refresh_part_selector()
+		
 		# Debug actual part positions after skeleton creation
 		print("POSITION_DEBUG: Skeleton created - checking part positions:")
 		for part_name in voxel_skeleton.parts.keys():
@@ -800,6 +979,9 @@ func load_multiple_obj_files(file_paths: PackedStringArray):
 			print("POSITION_DEBUG: FINAL POSITION - '", part_name, "': ", part_world_center)
 		
 		print("POSITION_DEBUG: ===============================")
+		
+		# Refresh the part selector with new parts
+		refresh_part_selector()
 		
 		# Auto-adjust camera distance based on model size
 		auto_adjust_camera_for_model()
@@ -950,6 +1132,152 @@ func _on_animation_finished(animation_name: String):
 func _on_constraint_violated(constraint: VoxelConstraintSystem.VoxelConstraint, part_name: String):
 	# Silenced - these fire constantly during normal operation
 	pass
+
+func _on_part_selected(index: int):
+	if index == 0:  # "Select Part..." option
+		selected_part = null
+		part_manipulation_ui.visible = false
+		hide_pivot_marker()
+		return
+	
+	var part_names = voxel_skeleton.parts.keys()
+	if index - 1 < part_names.size():
+		var part_name = part_names[index - 1]
+		selected_part = voxel_skeleton.parts[part_name]
+		part_manipulation_ui.visible = true
+		update_part_ui_values()
+		update_pivot_marker()
+		print("Selected part: ", part_name)
+
+func _on_position_changed(axis: String, delta: float):
+	if not selected_part:
+		return
+	
+	match axis:
+		"x":
+			selected_part.position.x += delta
+		"y":
+			selected_part.position.y += delta
+		"z":
+			selected_part.position.z += delta
+	
+	update_part_ui_values()
+	print("Part position changed: ", selected_part.position)
+
+func _on_rotation_changed(axis: String, delta_degrees: float):
+	if not selected_part:
+		return
+	
+	var delta_radians = deg_to_rad(delta_degrees)
+	
+	# Apply rotation around the pivot offset
+	apply_pivot_rotation(selected_part, axis, delta_radians)
+	
+	update_part_ui_values()
+	print("Part rotation changed: ", rad_to_deg(selected_part.rotation.x), ", ", rad_to_deg(selected_part.rotation.y), ", ", rad_to_deg(selected_part.rotation.z))
+	print("Pivot offset: ", selected_part.pivot_offset)
+
+func apply_pivot_rotation(part: VoxelPart, axis: String, delta_radians: float):
+	# Create rotation transform around the pivot offset
+	var pivot = part.pivot_offset
+	var rotation_axis: Vector3
+	
+	match axis:
+		"x":
+			rotation_axis = Vector3.RIGHT
+		"y":
+			rotation_axis = Vector3.UP
+		"z":
+			rotation_axis = Vector3.FORWARD
+	
+	# Create transform that rotates around the pivot point
+	# 1. Translate to move pivot to origin
+	# 2. Apply rotation
+	# 3. Translate back
+	var pivot_transform = Transform3D.IDENTITY
+	pivot_transform.origin = -pivot
+	
+	var rotation_transform = Transform3D(Basis(rotation_axis, delta_radians), Vector3.ZERO)
+	
+	var reverse_pivot_transform = Transform3D.IDENTITY
+	reverse_pivot_transform.origin = pivot
+	
+	# Combine transforms: translate back * rotate * translate to origin
+	var final_transform = reverse_pivot_transform * rotation_transform * pivot_transform
+	
+	# Apply the transform to the part
+	part.transform = part.transform * final_transform
+	
+	# Update the rotation property for UI display (approximate, since transform might include position changes)
+	var basis_rotation = part.transform.basis.get_euler()
+	part.rotation = basis_rotation
+
+func _on_pivot_changed(axis: String, delta: float):
+	if not selected_part:
+		return
+	
+	match axis:
+		"x":
+			selected_part.pivot_offset.x += delta
+		"y":
+			selected_part.pivot_offset.y += delta
+		"z":
+			selected_part.pivot_offset.z += delta
+	
+	update_part_ui_values()
+	update_pivot_marker()
+	print("Part pivot changed: ", selected_part.pivot_offset)
+
+func _on_reset_part():
+	if not selected_part:
+		return
+	
+	selected_part.transform = Transform3D.IDENTITY
+	selected_part.position = Vector3.ZERO
+	selected_part.rotation = Vector3.ZERO
+	selected_part.pivot_offset = selected_part.get_default_pivot_offset()
+	update_part_ui_values()
+	update_pivot_marker()
+	print("Part reset to origin with pivot at center: ", selected_part.pivot_offset)
+
+func _on_center_pivot():
+	if not selected_part:
+		return
+	
+	# Calculate the center of the part's voxels and set as pivot
+	var bounds = selected_part.get_bounds()
+	selected_part.pivot_offset = bounds.get_center()
+	update_part_ui_values()
+	update_pivot_marker()
+	print("Part pivot centered at: ", selected_part.pivot_offset)
+
+func update_part_ui_values():
+	if not selected_part:
+		return
+	
+	# Update position displays
+	position_controls["x"].text = "%.1f" % selected_part.position.x
+	position_controls["y"].text = "%.1f" % selected_part.position.y
+	position_controls["z"].text = "%.1f" % selected_part.position.z
+	
+	# Update rotation displays
+	rotation_controls["x"].text = "%.0f°" % rad_to_deg(selected_part.rotation.x)
+	rotation_controls["y"].text = "%.0f°" % rad_to_deg(selected_part.rotation.y)
+	rotation_controls["z"].text = "%.0f°" % rad_to_deg(selected_part.rotation.z)
+	
+	# Update pivot displays
+	pivot_controls["x"].text = "%.1f" % selected_part.pivot_offset.x
+	pivot_controls["y"].text = "%.1f" % selected_part.pivot_offset.y
+	pivot_controls["z"].text = "%.1f" % selected_part.pivot_offset.z
+
+func refresh_part_selector():
+	# Clear existing items except the first
+	part_selector.clear()
+	part_selector.add_item("Select Part...")
+	
+	# Add all current parts
+	for part_name in voxel_skeleton.parts.keys():
+		part_selector.add_item(part_name)
 
 func debug_single_obj_file(file_path: String):
 	print("=== DEBUG: Analyzing OBJ file: ", file_path, " ===")
@@ -1103,3 +1431,187 @@ func load_skeleton_from_file(file_path: String):
 		print("Loaded skeleton from: ", file_path)
 	else:
 		print("Failed to load skeleton from: ", file_path)
+
+func create_pivot_marker():
+	# Create a small cross-shaped marker to visualize the pivot point
+	if pivot_marker:
+		pivot_marker.queue_free()
+	
+	pivot_marker = MeshInstance3D.new()
+	add_child(pivot_marker)
+	
+	# Create a cross mesh using ArrayMesh
+	var array_mesh = ArrayMesh.new()
+	var vertices = PackedVector3Array()
+	var colors = PackedColorArray()
+	var indices = PackedInt32Array()
+	
+	var marker_size = 0.3
+	var line_thickness = 0.02
+	
+	# Create three perpendicular lines (X, Y, Z axes)
+	# X-axis line (red)
+	vertices.append_array([
+		Vector3(-marker_size, -line_thickness, -line_thickness),
+		Vector3(-marker_size, line_thickness, -line_thickness),
+		Vector3(marker_size, line_thickness, -line_thickness),
+		Vector3(marker_size, -line_thickness, -line_thickness),
+		Vector3(-marker_size, -line_thickness, line_thickness),
+		Vector3(-marker_size, line_thickness, line_thickness),
+		Vector3(marker_size, line_thickness, line_thickness),
+		Vector3(marker_size, -line_thickness, line_thickness)
+	])
+	
+	# Add red color for X-axis
+	for i in range(8):
+		colors.append(Color.RED)
+	
+	# Add indices for X-axis box
+	var x_indices = [
+		0, 1, 2, 0, 2, 3,  # front
+		4, 7, 6, 4, 6, 5,  # back
+		0, 4, 5, 0, 5, 1,  # left
+		3, 2, 6, 3, 6, 7,  # right
+		1, 5, 6, 1, 6, 2,  # top
+		0, 3, 7, 0, 7, 4   # bottom
+	]
+	indices.append_array(x_indices)
+	
+	# Y-axis line (green)
+	var y_offset = vertices.size()
+	vertices.append_array([
+		Vector3(-line_thickness, -marker_size, -line_thickness),
+		Vector3(line_thickness, -marker_size, -line_thickness),
+		Vector3(line_thickness, marker_size, -line_thickness),
+		Vector3(-line_thickness, marker_size, -line_thickness),
+		Vector3(-line_thickness, -marker_size, line_thickness),
+		Vector3(line_thickness, -marker_size, line_thickness),
+		Vector3(line_thickness, marker_size, line_thickness),
+		Vector3(-line_thickness, marker_size, line_thickness)
+	])
+	
+	# Add green color for Y-axis
+	for i in range(8):
+		colors.append(Color.GREEN)
+	
+	# Add indices for Y-axis box (offset by y_offset)
+	for idx in x_indices:
+		indices.append(idx + y_offset)
+	
+	# Z-axis line (blue)
+	var z_offset = vertices.size()
+	vertices.append_array([
+		Vector3(-line_thickness, -line_thickness, -marker_size),
+		Vector3(line_thickness, -line_thickness, -marker_size),
+		Vector3(line_thickness, line_thickness, -marker_size),
+		Vector3(-line_thickness, line_thickness, -marker_size),
+		Vector3(-line_thickness, -line_thickness, marker_size),
+		Vector3(line_thickness, -line_thickness, marker_size),
+		Vector3(line_thickness, line_thickness, marker_size),
+		Vector3(-line_thickness, line_thickness, marker_size)
+	])
+	
+	# Add blue color for Z-axis
+	for i in range(8):
+		colors.append(Color.BLUE)
+	
+	# Add indices for Z-axis box (offset by z_offset)
+	for idx in x_indices:
+		indices.append(idx + z_offset)
+	
+	# Create the mesh
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_INDEX] = indices
+	
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	pivot_marker.mesh = array_mesh
+	
+	# Create material that uses vertex colors and is always visible
+	var material = StandardMaterial3D.new()
+	material.vertex_color_use_as_albedo = true
+	material.albedo_color = Color.WHITE
+	material.flags_unshaded = true
+	material.no_depth_test = true  # Always render on top, ignoring depth
+	material.flags_transparent = true  # Allow transparency for when behind objects
+	material.flags_do_not_use_blend = false  # Enable blending
+	pivot_marker.set_surface_override_material(0, material)
+
+func update_pivot_marker():
+	if not selected_part:
+		hide_pivot_marker()
+		return
+	
+	if not pivot_marker:
+		create_pivot_marker()
+	
+	# Position the marker at the pivot offset relative to the selected part
+	pivot_marker.global_position = selected_part.global_position + selected_part.pivot_offset
+	pivot_marker.visible = true
+
+func hide_pivot_marker():
+	if pivot_marker:
+		pivot_marker.visible = false
+
+func _on_save_model_pressed():
+	# Create file dialog for saving
+	var save_dialog = FileDialog.new()
+	save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	save_dialog.access = FileDialog.ACCESS_RESOURCES
+	save_dialog.filters = PackedStringArray(["*.json ; JSON Model Files"])
+	save_dialog.current_dir = "res://models/"
+	save_dialog.current_file = "voxel_model.json"
+	
+	add_child(save_dialog)
+	save_dialog.file_selected.connect(_on_save_file_selected)
+	save_dialog.popup_centered(Vector2i(800, 600))
+
+func _on_save_file_selected(path: String):
+	print("Saving model to: ", path)
+	voxel_skeleton.save_skeleton_to_file(path)
+	print("Model saved successfully!")
+	
+	# Remove the dialog
+	for child in get_children():
+		if child is FileDialog and child.file_mode == FileDialog.FILE_MODE_SAVE_FILE:
+			child.queue_free()
+			break
+
+func _on_load_model_pressed():
+	# Create file dialog for loading
+	var load_dialog = FileDialog.new()
+	load_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	load_dialog.access = FileDialog.ACCESS_RESOURCES
+	load_dialog.filters = PackedStringArray(["*.json ; JSON Model Files"])
+	load_dialog.current_dir = "res://models/"
+	
+	add_child(load_dialog)
+	load_dialog.file_selected.connect(_on_load_file_selected)
+	load_dialog.popup_centered(Vector2i(800, 600))
+
+func _on_load_file_selected(path: String):
+	print("Loading model from: ", path)
+	if voxel_skeleton.load_skeleton_from_file(path):
+		print("Model loaded successfully!")
+		
+		# Update systems with the new skeleton
+		animation_system.skeleton = voxel_skeleton
+		constraint_system.skeleton = voxel_skeleton
+		
+		# Refresh part selector dropdown
+		refresh_part_selector()
+		
+		# Hide pivot marker since no part is selected
+		selected_part = null
+		part_manipulation_ui.visible = false
+		hide_pivot_marker()
+	else:
+		print("Failed to load model!")
+	
+	# Remove the dialog
+	for child in get_children():
+		if child is FileDialog and child.file_mode == FileDialog.FILE_MODE_OPEN_FILE:
+			child.queue_free()
+			break

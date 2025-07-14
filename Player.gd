@@ -10,14 +10,23 @@ extends CharacterBody3D
 var gravity: float = 9.8
 var dash_timer: float = 0.0
 var dash_direction: Vector3 = Vector3.ZERO
+var voxel_skeleton: VoxelSkeleton
+var map_generation_complete: bool = false
 
 func _ready():
 	print("Player controller ready!")
+	setup_voxel_character()
+	connect_to_map_generator()
 
 func _physics_process(delta):
-	# Add gravity
-	if not is_on_floor():
+	# Only apply gravity after map generation is complete
+	if map_generation_complete and not is_on_floor():
 		velocity.y -= gravity * delta
+	elif not map_generation_complete:
+		# Debug output to see if gravity is being skipped
+		if velocity.y != 0:
+			print("DEBUG: Gravity disabled, resetting Y velocity from ", velocity.y, " to 0")
+			velocity.y = 0  # Force Y velocity to 0 while waiting
 	
 	# Handle dash
 	if Input.is_action_just_pressed("dash") and dash_timer <= 0.0:
@@ -83,7 +92,12 @@ func _physics_process(delta):
 	if is_on_floor() and velocity.length() > 0:
 		attempt_step_up()
 	
-	move_and_slide()
+	# Only process movement if map generation is complete or if on the ground
+	if map_generation_complete or is_on_floor():
+		move_and_slide()
+	else:
+		# Ensure player doesn't move while waiting for map generation
+		velocity = Vector3.ZERO
 
 func attempt_step_up():
 	var horizontal_velocity = Vector3(velocity.x, 0, velocity.z)
@@ -147,3 +161,64 @@ func get_direction_name(direction: Vector3) -> String:
 		return "EAST" if direction.x > 0 else "WEST"
 	else:
 		return "SOUTH" if direction.z > 0 else "NORTH"
+
+func setup_voxel_character():
+	# Remove the existing CharacterSkin if it exists
+	var existing_skin = get_node_or_null("CharacterSkin")
+	if existing_skin:
+		existing_skin.queue_free()
+	
+	# Create and add VoxelSkeleton
+	voxel_skeleton = VoxelSkeleton.new()
+	add_child(voxel_skeleton)
+	
+	# Load our saved cat model
+	var model_path = "res://models/cat_001.json"
+	if FileAccess.file_exists(model_path):
+		if voxel_skeleton.load_skeleton_from_file(model_path):
+			print("Successfully loaded cat model!")
+			# Scale down the model to fit better with the player
+			voxel_skeleton.scale = Vector3(0.25, 0.25, 0.25)
+			# Rotate 180 degrees around Y-axis to align front/back with movement direction
+			voxel_skeleton.rotation.y = PI
+		else:
+			print("Failed to load cat model, creating default")
+			create_default_character()
+	else:
+		print("Cat model not found, creating default")
+		create_default_character()
+
+func create_default_character():
+	# Fallback: create a simple default character if cat model isn't available
+	var part = VoxelPart.new()
+	part.part_name = "body"
+	part.add_voxel(Vector3i(0, 0, 0), Color.BLUE)
+	part.add_voxel(Vector3i(0, 1, 0), Color.BLUE)
+	voxel_skeleton.add_part(part)
+	voxel_skeleton.set_root_part(part)
+
+func connect_to_map_generator():
+	# Find the VoxelGenerator and connect to its signal
+	var voxel_generator = get_node_or_null("../VoxelGenerator")
+	print("DEBUG: Looking for VoxelGenerator at ../VoxelGenerator: ", voxel_generator != null)
+	
+	if voxel_generator:
+		voxel_generator.initial_map_generation_complete.connect(_on_map_generation_complete)
+		print("DEBUG: Player connected to VoxelGenerator signals")
+		print("DEBUG: Initial generation already complete? ", voxel_generator.initial_generation_complete)
+		print("DEBUG: Player gravity disabled until map generation complete")
+		
+		# Check if generation is already complete (in case player loads after)
+		if voxel_generator.initial_generation_complete:
+			_on_map_generation_complete()
+	else:
+		print("WARNING: VoxelGenerator not found, enabling gravity immediately")
+		map_generation_complete = true
+
+func _on_map_generation_complete():
+	print("Map generation complete - enabling player gravity!")
+	map_generation_complete = true
+	
+	# If player is above ground level due to delayed gravity, give a small downward velocity
+	if global_position.y > 25:  # Above typical ground level
+		velocity.y = -2.0  # Small downward push to start falling

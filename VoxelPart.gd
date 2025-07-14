@@ -67,6 +67,10 @@ func set_voxel_positions(positions: Array, colors: Array = []):
 	while voxel_colors.size() < voxel_positions.size():
 		voxel_colors.append(Color.WHITE)
 	
+	# Set pivot to the center of the part by default (only if not already set)
+	if voxel_positions.size() > 0 and pivot_offset == Vector3.ZERO:
+		var bounds = get_bounds()
+		pivot_offset = bounds.get_center()
 	
 	call_deferred("update_mesh")
 	voxels_changed.emit()
@@ -230,6 +234,12 @@ func get_part_by_name(name: String) -> VoxelPart:
 			return result
 	
 	return null
+
+func get_default_pivot_offset() -> Vector3:
+	if voxel_positions.size() > 0:
+		var bounds = get_bounds()
+		return bounds.get_center()
+	return Vector3.ZERO
 
 func reset_to_original_positions():
 	set_voxel_positions(original_positions, voxel_colors)
