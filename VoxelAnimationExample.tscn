@@ -33,68 +33,105 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI"]
+[node name="ScrollContainer" type="ScrollContainer" parent="UI"]
 layout_mode = 1
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 20.0
-offset_top = -200.0
+offset_top = -600.0
 offset_right = 300.0
 offset_bottom = -20.0
 grow_vertical = 0
+vertical_scroll_mode = 1
+horizontal_scroll_mode = 0
 
-[node name="EntityTypeLabel" type="Label" parent="UI/VBoxContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="EntityTypeLabel" type="Label" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Entity Type: Humanoid"
 
-[node name="EntityButtons" type="HBoxContainer" parent="UI/VBoxContainer"]
+[node name="EntityButtons" type="HBoxContainer" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 
-[node name="HumanoidBtn" type="Button" parent="UI/VBoxContainer/EntityButtons"]
+[node name="HumanoidBtn" type="Button" parent="UI/ScrollContainer/VBoxContainer/EntityButtons"]
 layout_mode = 2
 text = "Humanoid"
 
-[node name="QuadrupedBtn" type="Button" parent="UI/VBoxContainer/EntityButtons"]
+[node name="QuadrupedBtn" type="Button" parent="UI/ScrollContainer/VBoxContainer/EntityButtons"]
 layout_mode = 2
 text = "Quadruped"
 
-[node name="BirdBtn" type="Button" parent="UI/VBoxContainer/EntityButtons"]
+[node name="BirdBtn" type="Button" parent="UI/ScrollContainer/VBoxContainer/EntityButtons"]
 layout_mode = 2
 text = "Bird"
 
-[node name="HSeparator" type="HSeparator" parent="UI/VBoxContainer"]
+[node name="HSeparator" type="HSeparator" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 
-[node name="AnimationLabel" type="Label" parent="UI/VBoxContainer"]
+[node name="AnimationLabel" type="Label" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Animation: idle"
 
-[node name="AnimationButtons" type="HBoxContainer" parent="UI/VBoxContainer"]
+[node name="AnimationButtons" type="HBoxContainer" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 
-[node name="IdleBtn" type="Button" parent="UI/VBoxContainer/AnimationButtons"]
+[node name="IdleBtn" type="Button" parent="UI/ScrollContainer/VBoxContainer/AnimationButtons"]
 layout_mode = 2
 text = "Idle"
 
-[node name="WalkBtn" type="Button" parent="UI/VBoxContainer/AnimationButtons"]
+[node name="WalkBtn" type="Button" parent="UI/ScrollContainer/VBoxContainer/AnimationButtons"]
 layout_mode = 2
 text = "Walk"
 
-[node name="RunBtn" type="Button" parent="UI/VBoxContainer/AnimationButtons"]
+[node name="RunBtn" type="Button" parent="UI/ScrollContainer/VBoxContainer/AnimationButtons"]
 layout_mode = 2
 text = "Run"
 
-[node name="HSeparator2" type="HSeparator" parent="UI/VBoxContainer"]
+[node name="HSeparator2" type="HSeparator" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 
-[node name="OBJImportLabel" type="Label" parent="UI/VBoxContainer"]
+[node name="OBJImportLabel" type="Label" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "OBJ Import:"
 
-[node name="ImportBtn" type="Button" parent="UI/VBoxContainer"]
+[node name="ImportBtn" type="Button" parent="UI/ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Load OBJ File"
+
+[node name="KeyframeTimeline" type="Panel" parent="UI"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 320.0
+offset_top = -150.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="TimelineScrollContainer" type="ScrollContainer" parent="UI/KeyframeTimeline"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+vertical_scroll_mode = 0
+horizontal_scroll_mode = 1
+
+[node name="TimelineContainer" type="HBoxContainer" parent="UI/KeyframeTimeline/TimelineScrollContainer"]
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="FileDialog" type="FileDialog" parent="UI"]
 title = "Open a File"

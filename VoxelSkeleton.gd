@@ -169,7 +169,10 @@ func create_animation(animation_name: String, duration: float) -> Animation:
 	var animation = Animation.new()
 	animation.length = duration
 	
-	animation_player.add_animation_library("default", AnimationLibrary.new())
+	# Only create the library if it doesn't exist
+	if not animation_player.has_animation_library("default"):
+		animation_player.add_animation_library("default", AnimationLibrary.new())
+	
 	var library = animation_player.get_animation_library("default")
 	library.add_animation(animation_name, animation)
 	
@@ -191,19 +194,45 @@ func add_part_keyframe(animation_name: String, part_name: String, time: float,
 	var node_path = get_path_to(part)
 	
 	if position != Vector3.INF:
-		var pos_track = animation.add_track(Animation.TYPE_POSITION_3D)
-		animation.track_set_path(pos_track, node_path)
+		# Find existing position track or create new one
+		var pos_track = -1
+		for track_idx in range(animation.get_track_count()):
+			if (animation.track_get_path(track_idx) == node_path and 
+				animation.track_get_type(track_idx) == Animation.TYPE_POSITION_3D):
+				pos_track = track_idx
+				break
+		
+		if pos_track == -1:
+			pos_track = animation.add_track(Animation.TYPE_POSITION_3D)
+			animation.track_set_path(pos_track, node_path)
+		
 		animation.track_insert_key(pos_track, time, position)
+		print("DEBUG: Added position keyframe at time ", time, " for part ", part_name, ": ", position)
 	
 	if rotation != Vector3.INF:
-		var rot_track = animation.add_track(Animation.TYPE_ROTATION_3D)
-		animation.track_set_path(rot_track, node_path)
+		# Find existing rotation track or create new one
+		var rot_track = -1
+		for track_idx in range(animation.get_track_count()):
+			if (animation.track_get_path(track_idx) == node_path and 
+				animation.track_get_type(track_idx) == Animation.TYPE_ROTATION_3D):
+				rot_track = track_idx
+				break
+		
+		if rot_track == -1:
+			rot_track = animation.add_track(Animation.TYPE_ROTATION_3D)
+			animation.track_set_path(rot_track, node_path)
+		
 		var quat = Quaternion.from_euler(rotation)
 		animation.track_insert_key(rot_track, time, quat)
+		print("DEBUG: Added rotation keyframe at time ", time, " for part ", part_name, ": ", rotation, " (quat: ", quat, ")")
 
 func play_animation(animation_name: String, blend_time: float = 0.1):
+	# Try the animation name directly first
 	if animation_player.has_animation(animation_name):
 		animation_player.play(animation_name, blend_time)
+	# If that fails, try with the default library prefix
+	elif animation_player.has_animation("default/" + animation_name):
+		animation_player.play("default/" + animation_name, blend_time)
 	else:
 		push_error("Animation '" + animation_name + "' not found")
 

@@ -4,19 +4,30 @@ extends Node3D
 @onready var animation_system = $VoxelSkeleton/VoxelAnimationSystem
 @onready var constraint_system = $VoxelSkeleton/VoxelConstraintSystem
 
-@onready var entity_label = $UI/VBoxContainer/EntityTypeLabel
-@onready var animation_label = $UI/VBoxContainer/AnimationLabel
+@onready var entity_label = $UI/ScrollContainer/VBoxContainer/EntityTypeLabel
+@onready var animation_label = $UI/ScrollContainer/VBoxContainer/AnimationLabel
 @onready var file_dialog = $UI/FileDialog
 
-@onready var humanoid_btn = $UI/VBoxContainer/EntityButtons/HumanoidBtn
-@onready var quadruped_btn = $UI/VBoxContainer/EntityButtons/QuadrupedBtn
-@onready var bird_btn = $UI/VBoxContainer/EntityButtons/BirdBtn
+@onready var humanoid_btn = $UI/ScrollContainer/VBoxContainer/EntityButtons/HumanoidBtn
+@onready var quadruped_btn = $UI/ScrollContainer/VBoxContainer/EntityButtons/QuadrupedBtn
+@onready var bird_btn = $UI/ScrollContainer/VBoxContainer/EntityButtons/BirdBtn
 
-@onready var idle_btn = $UI/VBoxContainer/AnimationButtons/IdleBtn
-@onready var walk_btn = $UI/VBoxContainer/AnimationButtons/WalkBtn
-@onready var run_btn = $UI/VBoxContainer/AnimationButtons/RunBtn
+# Keyframe timeline UI
+@onready var timeline_container = $UI/KeyframeTimeline/TimelineScrollContainer/TimelineContainer
 
-@onready var import_btn = $UI/VBoxContainer/ImportBtn
+# Dynamic animation UI variables
+var animation_dropdown: OptionButton = null
+var animation_name_input: LineEdit = null
+var current_animation_name: String = ""
+
+# Keyframe control variables
+var keyframe_time_input: SpinBox = null
+var keyframe_controls_ui: Control = null
+var current_keyframe_time: float = 0.0
+var auto_keyframe_enabled: bool = true
+var last_part_transforms: Dictionary = {}  # Store last known transforms to detect changes
+
+@onready var import_btn = $UI/ScrollContainer/VBoxContainer/ImportBtn
 
 var current_entity_type: VoxelSkeleton.EntityType = VoxelSkeleton.EntityType.HUMANOID
 var last_imported_file: String = ""
@@ -29,6 +40,12 @@ var position_controls: Dictionary = {}
 var rotation_controls: Dictionary = {}
 var pivot_controls: Dictionary = {}
 var pivot_marker: MeshInstance3D = null
+var part_rest_positions: Dictionary = {}  # Store original connection offsets for each part
+
+# Keyframe timeline variables
+var keyframe_display_items: Array = []  # Store references to timeline UI elements
+var last_seek_time: float = -1.0  # Track last animation seek time to prevent rapid calls
+var is_seeking_to_keyframe: bool = false  # Flag to prevent double-triggering during keyframe seeks
 
 # Camera control variables
 var camera_distance: float = 10.0
@@ -39,7 +56,11 @@ var mouse_sensitivity: float = 0.5
 var zoom_speed: float = 2.0
 var is_rotating: bool = false
 
+# UI reference for scrollable container
+var ui_container: VBoxContainer = null
+
 func _ready():
+	setup_scrollable_ui()
 	setup_ui_connections()
 	create_initial_skeleton()
 	setup_camera_controls()
@@ -53,31 +74,37 @@ func _ready():
 	print("The system will automatically find companion files there.")
 	print("==========================")
 
+func setup_scrollable_ui():
+	# Reference the VBoxContainer within the ScrollContainer
+	ui_container = $UI/ScrollContainer/VBoxContainer
+	print("Using scrollable VBoxContainer for UI")
+	print("ScrollContainer size: ", $UI/ScrollContainer.size)
+	print("VBoxContainer size: ", ui_container.size)
+
 func setup_ui_connections():
 	humanoid_btn.pressed.connect(_on_humanoid_pressed)
 	quadruped_btn.pressed.connect(_on_quadruped_pressed)
 	bird_btn.pressed.connect(_on_bird_pressed)
 	
-	idle_btn.pressed.connect(_on_idle_pressed)
-	walk_btn.pressed.connect(_on_walk_pressed)
-	run_btn.pressed.connect(_on_run_pressed)
-	
 	import_btn.pressed.connect(_on_import_pressed)
-	
+		
 	# Add batch import button
 	var batch_btn = Button.new()
 	batch_btn.text = "Load Multiple OBJ Files"
 	batch_btn.pressed.connect(_on_batch_import_pressed)
-	$UI/VBoxContainer.add_child(batch_btn)
+	ui_container.add_child(batch_btn)
 	
 	# Add separator
 	var separator = HSeparator.new()
-	$UI/VBoxContainer.add_child(separator)
+	ui_container.add_child(separator)
 	
+	# Setup dynamic animation UI
+	setup_animation_editor_ui()
+
 	# Add model save/load section
 	var model_label = Label.new()
 	model_label.text = "Model Save/Load:"
-	$UI/VBoxContainer.add_child(model_label)
+	ui_container.add_child(model_label)
 	
 	var save_load_buttons = HBoxContainer.new()
 	
@@ -91,7 +118,108 @@ func setup_ui_connections():
 	load_btn.pressed.connect(_on_load_model_pressed)
 	save_load_buttons.add_child(load_btn)
 	
-	$UI/VBoxContainer.add_child(save_load_buttons)
+	ui_container.add_child(save_load_buttons)
+
+func setup_animation_editor_ui():
+	# Add separator
+	var separator = HSeparator.new()
+	ui_container.add_child(separator)
+	
+	# Animation Editor section
+	var anim_label = Label.new()
+	anim_label.text = "Animation Editor:"
+	ui_container.add_child(anim_label)
+	
+	# Current animation dropdown
+	var current_anim_container = HBoxContainer.new()
+	var dropdown_label = Label.new()
+	dropdown_label.text = "Current:"
+	dropdown_label.custom_minimum_size.x = 60
+	current_anim_container.add_child(dropdown_label)
+	
+	animation_dropdown = OptionButton.new()
+	animation_dropdown.add_item("No animations")
+	animation_dropdown.item_selected.connect(_on_animation_selected)
+	current_anim_container.add_child(animation_dropdown)
+	ui_container.add_child(current_anim_container)
+	
+	# New animation creation
+	var new_anim_container = HBoxContainer.new()
+	var name_label = Label.new()
+	name_label.text = "Name:"
+	name_label.custom_minimum_size.x = 60
+	new_anim_container.add_child(name_label)
+	
+	animation_name_input = LineEdit.new()
+	animation_name_input.placeholder_text = "Enter animation name..."
+	animation_name_input.custom_minimum_size.x = 150
+	new_anim_container.add_child(animation_name_input)
+	
+	var add_btn = Button.new()
+	add_btn.text = "Add"
+	add_btn.pressed.connect(_on_add_animation_pressed)
+	new_anim_container.add_child(add_btn)
+	ui_container.add_child(new_anim_container)
+	
+	# Animation control buttons
+	var anim_buttons = HBoxContainer.new()
+	
+	var play_btn = Button.new()
+	play_btn.text = "Play"
+	play_btn.pressed.connect(_on_play_animation_pressed)
+	anim_buttons.add_child(play_btn)
+	
+	var stop_btn = Button.new()
+	stop_btn.text = "Stop"
+	stop_btn.pressed.connect(_on_stop_animation_pressed)
+	anim_buttons.add_child(stop_btn)
+	
+	var delete_btn = Button.new()
+	delete_btn.text = "Delete"
+	delete_btn.pressed.connect(_on_delete_animation_pressed)
+	anim_buttons.add_child(delete_btn)
+	
+	ui_container.add_child(anim_buttons)
+	
+	# Animation export/import controls
+	var export_import_label = Label.new()
+	export_import_label.text = "Animation Export/Import:"
+	ui_container.add_child(export_import_label)
+	
+	var export_import_buttons = HBoxContainer.new()
+	
+	var export_btn = Button.new()
+	export_btn.text = "Export Animation"
+	export_btn.pressed.connect(_on_export_animation_pressed)
+	export_import_buttons.add_child(export_btn)
+	
+	var import_btn = Button.new()
+	import_btn.text = "Import Animation"
+	import_btn.pressed.connect(_on_import_animation_pressed)
+	export_import_buttons.add_child(import_btn)
+	
+	ui_container.add_child(export_import_buttons)
+	
+	# Animation library export/import (all animations at once)
+	var library_buttons = HBoxContainer.new()
+	
+	var export_all_btn = Button.new()
+	export_all_btn.text = "Export All Animations"
+	export_all_btn.pressed.connect(_on_export_all_animations_pressed)
+	library_buttons.add_child(export_all_btn)
+	
+	var import_library_btn = Button.new()
+	import_library_btn.text = "Import Animation Library"
+	import_library_btn.pressed.connect(_on_import_animation_library_pressed)
+	library_buttons.add_child(import_library_btn)
+	
+	ui_container.add_child(library_buttons)
+	
+	# Add keyframe controls
+	setup_keyframe_controls()
+	
+	# Initialize with available animations
+	refresh_animation_list()
 	
 	# Add part manipulation UI
 	setup_part_manipulation_ui()
@@ -103,25 +231,92 @@ func setup_ui_connections():
 	animation_system.animation_finished.connect(_on_animation_finished)
 	constraint_system.constraint_violated.connect(_on_constraint_violated)
 
+func setup_keyframe_controls():
+	# Add separator
+	var separator = HSeparator.new()
+	ui_container.add_child(separator)
+	
+	# Keyframe Editor section
+	var keyframe_label = Label.new()
+	keyframe_label.text = "Keyframe Editor:"
+	ui_container.add_child(keyframe_label)
+	
+	# Time input
+	var time_container = HBoxContainer.new()
+	var time_label = Label.new()
+	time_label.text = "Time (s):"
+	time_label.custom_minimum_size.x = 60
+	time_container.add_child(time_label)
+	
+	keyframe_time_input = SpinBox.new()
+	keyframe_time_input.min_value = 0.0
+	keyframe_time_input.max_value = 10.0
+	keyframe_time_input.step = 0.1
+	keyframe_time_input.value = 0.0
+	keyframe_time_input.custom_minimum_size.x = 100
+	keyframe_time_input.value_changed.connect(_on_keyframe_time_changed)
+	time_container.add_child(keyframe_time_input)
+	ui_container.add_child(time_container)
+	
+	# Keyframe action buttons
+	var keyframe_buttons = HBoxContainer.new()
+	
+	var add_keyframe_btn = Button.new()
+	add_keyframe_btn.text = "Add Keyframe"
+	add_keyframe_btn.pressed.connect(_on_add_keyframe_pressed)
+	keyframe_buttons.add_child(add_keyframe_btn)
+	
+	var remove_keyframe_btn = Button.new()
+	remove_keyframe_btn.text = "Remove Keyframe"
+	remove_keyframe_btn.pressed.connect(_on_remove_keyframe_pressed)
+	keyframe_buttons.add_child(remove_keyframe_btn)
+	
+	var seek_btn = Button.new()
+	seek_btn.text = "Seek to Time"
+	seek_btn.pressed.connect(_on_seek_to_time_pressed)
+	keyframe_buttons.add_child(seek_btn)
+	
+	ui_container.add_child(keyframe_buttons)
+	
+	# Keyframe controls container (initially hidden)
+	keyframe_controls_ui = VBoxContainer.new()
+	keyframe_controls_ui.visible = false
+	ui_container.add_child(keyframe_controls_ui)
+	
+	# Auto-keyframe toggle
+	var auto_keyframe_container = HBoxContainer.new()
+	var auto_keyframe_checkbox = CheckBox.new()
+	auto_keyframe_checkbox.text = "Auto-keyframe on transform"
+	auto_keyframe_checkbox.button_pressed = auto_keyframe_enabled
+	auto_keyframe_checkbox.toggled.connect(_on_auto_keyframe_toggled)
+	auto_keyframe_container.add_child(auto_keyframe_checkbox)
+	keyframe_controls_ui.add_child(auto_keyframe_container)
+	
+	# Info label
+	var info_label = Label.new()
+	info_label.text = "Select a part and animation to add keyframes."
+	info_label.add_theme_color_override("font_color", Color.GRAY)
+	keyframe_controls_ui.add_child(info_label)
+
 func setup_part_manipulation_ui():
 	# Create part manipulation section
 	var separator = HSeparator.new()
-	$UI/VBoxContainer.add_child(separator)
+	ui_container.add_child(separator)
 	
 	var part_label = Label.new()
 	part_label.text = "Part Manipulation:"
-	$UI/VBoxContainer.add_child(part_label)
+	ui_container.add_child(part_label)
 	
 	# Part selector dropdown
 	part_selector = OptionButton.new()
 	part_selector.add_item("Select Part...")
 	part_selector.item_selected.connect(_on_part_selected)
-	$UI/VBoxContainer.add_child(part_selector)
+	ui_container.add_child(part_selector)
 	
 	# Create collapsible manipulation controls
 	part_manipulation_ui = VBoxContainer.new()
 	part_manipulation_ui.visible = false
-	$UI/VBoxContainer.add_child(part_manipulation_ui)
+	ui_container.add_child(part_manipulation_ui)
 	
 	# Position controls
 	var pos_label = Label.new()
@@ -260,7 +455,7 @@ func setup_camera_controls():
 	zoom_controls.add_child(reset_btn)
 	camera_controls.add_child(zoom_controls)
 	
-	$UI/VBoxContainer.add_child(camera_controls)
+	ui_container.add_child(camera_controls)
 	
 	# Create a transparent input area that covers the viewport for camera controls
 	var input_area = ColorRect.new()
@@ -345,10 +540,16 @@ func create_skeleton_for_entity_type(entity_type: VoxelSkeleton.EntityType):
 		animation_system.skeleton = voxel_skeleton
 		constraint_system.skeleton = voxel_skeleton
 		
+		# Store rest positions for animation consistency (after skeleton is fully set up)
+		store_part_rest_positions()
+		
 		# Refresh the part selector dropdown
 		refresh_part_selector()
 		
 		animation_system.create_default_animations_for_entity_type(entity_type)
+		
+		# Refresh animation list to show new default animations
+		refresh_animation_list()
 		
 		constraint_system.setup_default_constraints_for_entity_type(entity_type)
 		
@@ -376,20 +577,6 @@ func _on_quadruped_pressed():
 func _on_bird_pressed():
 	create_skeleton_for_entity_type(VoxelSkeleton.EntityType.BIRD)
 
-func _on_idle_pressed():
-	animation_system.play_animation("idle", true)
-
-func _on_walk_pressed():
-	animation_system.play_animation("walk", true)
-
-func _on_run_pressed():
-	var animation_name = "run"
-	if current_entity_type == VoxelSkeleton.EntityType.QUADRUPED:
-		animation_name = "gallop"
-	elif current_entity_type == VoxelSkeleton.EntityType.BIRD:
-		animation_name = "fly"
-	
-	animation_system.play_animation(animation_name, true)
 
 func _on_import_pressed():
 	file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
@@ -443,6 +630,9 @@ func load_obj_file(file_path: String):
 		voxel_skeleton.create_skeleton_from_template(template)
 		animation_system.skeleton = voxel_skeleton
 		constraint_system.skeleton = voxel_skeleton
+		
+		# Store rest positions for animation consistency (after skeleton is fully set up)
+		store_part_rest_positions()
 		
 		# Refresh the part selector dropdown
 		refresh_part_selector()
@@ -983,6 +1173,9 @@ func load_multiple_obj_files(file_paths: PackedStringArray):
 		# Refresh the part selector with new parts
 		refresh_part_selector()
 		
+		# Store rest positions for animation consistency
+		store_part_rest_positions()
+		
 		# Auto-adjust camera distance based on model size
 		auto_adjust_camera_for_model()
 		
@@ -1138,6 +1331,8 @@ func _on_part_selected(index: int):
 		selected_part = null
 		part_manipulation_ui.visible = false
 		hide_pivot_marker()
+		update_keyframe_controls_visibility()
+		update_keyframe_timeline()
 		return
 	
 	var part_names = voxel_skeleton.parts.keys()
@@ -1147,6 +1342,8 @@ func _on_part_selected(index: int):
 		part_manipulation_ui.visible = true
 		update_part_ui_values()
 		update_pivot_marker()
+		update_keyframe_controls_visibility()
+		update_keyframe_timeline()
 		print("Selected part: ", part_name)
 
 func _on_position_changed(axis: String, delta: float):
@@ -1162,6 +1359,7 @@ func _on_position_changed(axis: String, delta: float):
 			selected_part.position.z += delta
 	
 	update_part_ui_values()
+	auto_save_keyframe_if_needed(selected_part)
 	print("Part position changed: ", selected_part.position)
 
 func _on_rotation_changed(axis: String, delta_degrees: float):
@@ -1174,6 +1372,7 @@ func _on_rotation_changed(axis: String, delta_degrees: float):
 	apply_pivot_rotation(selected_part, axis, delta_radians)
 	
 	update_part_ui_values()
+	auto_save_keyframe_if_needed(selected_part)
 	print("Part rotation changed: ", rad_to_deg(selected_part.rotation.x), ", ", rad_to_deg(selected_part.rotation.y), ", ", rad_to_deg(selected_part.rotation.z))
 	print("Pivot offset: ", selected_part.pivot_offset)
 
@@ -1232,13 +1431,15 @@ func _on_reset_part():
 	if not selected_part:
 		return
 	
+	# Reset to rest position, not absolute zero
+	var rest_pos = get_part_rest_position(selected_part.part_name)
 	selected_part.transform = Transform3D.IDENTITY
-	selected_part.position = Vector3.ZERO
+	selected_part.position = rest_pos
 	selected_part.rotation = Vector3.ZERO
 	selected_part.pivot_offset = selected_part.get_default_pivot_offset()
 	update_part_ui_values()
 	update_pivot_marker()
-	print("Part reset to origin with pivot at center: ", selected_part.pivot_offset)
+	print("Part reset to rest position ", rest_pos, " with pivot at center: ", selected_part.pivot_offset)
 
 func _on_center_pivot():
 	if not selected_part:
@@ -1255,10 +1456,16 @@ func update_part_ui_values():
 	if not selected_part:
 		return
 	
-	# Update position displays
-	position_controls["x"].text = "%.1f" % selected_part.position.x
-	position_controls["y"].text = "%.1f" % selected_part.position.y
-	position_controls["z"].text = "%.1f" % selected_part.position.z
+	# Calculate position relative to rest position for display
+	var rest_pos = get_part_rest_position(selected_part.part_name)
+	var relative_pos = selected_part.position - rest_pos
+	
+	# Debug: print("DEBUG - Part '", selected_part.part_name, "': Current pos: ", selected_part.position, ", Rest pos: ", rest_pos, ", Relative: ", relative_pos)
+	
+	# Update position displays (show relative to rest position)
+	position_controls["x"].text = "%.1f" % relative_pos.x
+	position_controls["y"].text = "%.1f" % relative_pos.y
+	position_controls["z"].text = "%.1f" % relative_pos.z
 	
 	# Update rotation displays
 	rotation_controls["x"].text = "%.0f°" % rad_to_deg(selected_part.rotation.x)
@@ -1383,9 +1590,23 @@ func _unhandled_input(event):
 		camera_angle_v = clamp(camera_angle_v - event.relative.y * mouse_sensitivity, -80.0, 80.0)
 		update_camera_position()
 
+func is_text_input_focused() -> bool:
+	# Check if any text input fields have focus to disable hotkeys
+	if animation_name_input and animation_name_input.has_focus():
+		return true
+	if keyframe_time_input and keyframe_time_input.has_focus():
+		return true
+	
+	# Check if any other text inputs in the scene have focus
+	var focused_control = get_viewport().gui_get_focus_owner()
+	if focused_control and (focused_control is LineEdit or focused_control is SpinBox or focused_control is TextEdit):
+		return true
+	
+	return false
+
 func _input(event):
-	# Handle keyboard shortcuts
-	if event is InputEventKey and event.pressed:
+	# Handle keyboard shortcuts only if no text input is focused
+	if event is InputEventKey and event.pressed and not is_text_input_focused():
 		match event.keycode:
 			KEY_1:
 				_on_humanoid_pressed()
@@ -1393,12 +1614,6 @@ func _input(event):
 				_on_quadruped_pressed()
 			KEY_3:
 				_on_bird_pressed()
-			KEY_SPACE:
-				_on_idle_pressed()
-			KEY_W:
-				_on_walk_pressed()
-			KEY_R:
-				_on_run_pressed()
 			KEY_I:
 				_on_import_pressed()
 			KEY_ESCAPE:
@@ -1423,6 +1638,22 @@ func save_current_skeleton():
 		var file_path = "user://skeleton_" + str(current_entity_type) + ".json"
 		voxel_skeleton.save_skeleton_to_file(file_path)
 		print("Saved skeleton to: ", file_path)
+
+func store_part_rest_positions():
+	# Store the actual part positions after skeleton creation as rest positions
+	part_rest_positions.clear()
+	
+	# Store the actual positions where parts ended up after skeleton creation
+	for part_name in voxel_skeleton.parts:
+		var part = voxel_skeleton.parts[part_name]
+		part_rest_positions[part_name] = part.position
+	
+	print("Stored actual rest positions for animation consistency:")
+	for part_name in part_rest_positions:
+		print("  ", part_name, ": ", part_rest_positions[part_name])
+
+func get_part_rest_position(part_name: String) -> Vector3:
+	return part_rest_positions.get(part_name, Vector3.ZERO)
 
 func load_skeleton_from_file(file_path: String):
 	if voxel_skeleton.load_skeleton_from_file(file_path):
@@ -1555,6 +1786,362 @@ func hide_pivot_marker():
 	if pivot_marker:
 		pivot_marker.visible = false
 
+# Animation Editor Functions
+func refresh_animation_list():
+	if not animation_dropdown:
+		return
+	
+	animation_dropdown.clear()
+	var animation_player = voxel_skeleton.animation_player
+	
+	if animation_player and animation_player.has_animation_library("default"):
+		var library = animation_player.get_animation_library("default")
+		var animation_names = library.get_animation_list()
+		
+		if animation_names.size() > 0:
+			for anim_name in animation_names:
+				animation_dropdown.add_item(anim_name)
+			if current_animation_name in animation_names:
+				var index = animation_names.find(current_animation_name)
+				animation_dropdown.selected = index
+		else:
+			animation_dropdown.add_item("No animations")
+	else:
+		animation_dropdown.add_item("No animations")
+
+func _on_animation_selected(index: int):
+	if not animation_dropdown or index < 0:
+		return
+	
+	var selected_text = animation_dropdown.get_item_text(index)
+	if selected_text != "No animations":
+		current_animation_name = selected_text
+		update_keyframe_controls_visibility()
+		update_keyframe_timeline()
+		print("Selected animation: ", current_animation_name)
+	else:
+		current_animation_name = ""
+		update_keyframe_controls_visibility()
+		update_keyframe_timeline()
+
+func _on_add_animation_pressed():
+	if not animation_name_input:
+		return
+	
+	var new_name = animation_name_input.text.strip_edges()
+	if new_name == "":
+		print("Animation name cannot be empty!")
+		return
+	
+	# Check if animation already exists
+	var animation_player = voxel_skeleton.animation_player
+	if animation_player.has_animation_library("default"):
+		var library = animation_player.get_animation_library("default")
+		if library.has_animation(new_name):
+			print("Animation '", new_name, "' already exists!")
+			return
+	
+	# Create new animation
+	var new_animation = voxel_skeleton.create_animation(new_name, 2.0)  # 2 second default duration
+	current_animation_name = new_name
+	animation_name_input.text = ""
+	refresh_animation_list()
+	update_keyframe_timeline()
+	
+	print("Created new animation: ", new_name)
+	print("Animation has ", new_animation.get_track_count(), " tracks")
+	print("AnimationPlayer has animation library: ", animation_player.has_animation_library("default"))
+	if animation_player.has_animation_library("default"):
+		var library = animation_player.get_animation_library("default")
+		print("Library has animation '", new_name, "': ", library.has_animation(new_name))
+		print("AnimationPlayer recognizes animation: ", animation_player.has_animation(new_name))
+		print("All animations in library: ", library.get_animation_list())
+		print("All animations known to player: ", animation_player.get_animation_list())
+
+func _on_play_animation_pressed():
+	if current_animation_name != "" and current_animation_name != "No animations":
+		voxel_skeleton.play_animation(current_animation_name)
+		print("Playing animation: ", current_animation_name)
+	else:
+		print("No animation selected to play!")
+
+func _on_stop_animation_pressed():
+	voxel_skeleton.stop_animation()
+	print("Animation stopped")
+
+func _on_delete_animation_pressed():
+	if current_animation_name == "" or current_animation_name == "No animations":
+		print("No animation selected to delete!")
+		return
+	
+	var animation_player = voxel_skeleton.animation_player
+	if animation_player.has_animation_library("default"):
+		var library = animation_player.get_animation_library("default")
+		if library.has_animation(current_animation_name):
+			library.remove_animation(current_animation_name)
+			print("Deleted animation: ", current_animation_name)
+			current_animation_name = ""
+			refresh_animation_list()
+		else:
+			print("Animation not found: ", current_animation_name)
+	else:
+		print("No animation library found!")
+
+# Keyframe Editor Functions
+func _on_keyframe_time_changed(value: float):
+	# Skip if this change was triggered by seeking to a keyframe
+	if is_seeking_to_keyframe:
+		return
+	
+	current_keyframe_time = value
+	print("DEBUG: Keyframe time changed to ", value)
+	# Auto-load part positions when scrubbing through animation
+	await load_parts_at_animation_time(current_keyframe_time)
+	# Force UI update after loading
+	if selected_part:
+		update_part_ui_values()
+		update_pivot_marker()
+
+func _on_add_keyframe_pressed():
+	if current_animation_name == "" or current_animation_name == "No animations":
+		print("No animation selected! Please select an animation first.")
+		return
+	
+	if not selected_part:
+		print("No part selected! Please select a part first.")
+		return
+	
+	# Add keyframe at current time with absolute transforms (Godot expects absolute positions)
+	var current_position = selected_part.position
+	var current_rotation = selected_part.rotation
+	
+	voxel_skeleton.add_part_keyframe(
+		current_animation_name,
+		selected_part.part_name,
+		current_keyframe_time,
+		current_position,  # Store absolute position
+		current_rotation
+	)
+	
+	var rest_pos = get_part_rest_position(selected_part.part_name)
+	var relative_pos = current_position - rest_pos
+	print("Added keyframe for part '", selected_part.part_name, "' at time ", current_keyframe_time, "s")
+	print("  Absolute position: ", current_position, " (relative: ", relative_pos, ", rest: ", rest_pos, ")")
+	print("  Rotation: ", Vector3(rad_to_deg(current_rotation.x), rad_to_deg(current_rotation.y), rad_to_deg(current_rotation.z)))
+	
+	# Update the keyframe timeline display
+	update_keyframe_timeline()
+
+func _on_remove_keyframe_pressed():
+	if current_animation_name == "" or current_animation_name == "No animations":
+		print("No animation selected! Please select an animation first.")
+		return
+	
+	if not selected_part:
+		print("No part selected! Please select a part first.")
+		return
+	
+	# Get the animation and find keyframes to remove
+	var animation_player = voxel_skeleton.animation_player
+	if not animation_player.has_animation_library("default"):
+		print("No animation library found!")
+		return
+	
+	var library = animation_player.get_animation_library("default")
+	if not library.has_animation(current_animation_name):
+		print("Animation not found!")
+		return
+	
+	var animation = library.get_animation(current_animation_name)
+	var part_path = voxel_skeleton.get_path_to(selected_part)
+	
+	# Find and remove keyframes at the current time for this part
+	var removed_count = 0
+	for track_idx in range(animation.get_track_count()):
+		if animation.track_get_path(track_idx) == part_path:
+			# Find keyframes at the current time (with small tolerance)
+			var keys_to_remove = []
+			for key_idx in range(animation.track_get_key_count(track_idx)):
+				var key_time = animation.track_get_key_time(track_idx, key_idx)
+				if abs(key_time - current_keyframe_time) < 0.05:  # 50ms tolerance
+					keys_to_remove.append(key_idx)
+			
+			# Remove keyframes in reverse order to maintain indices
+			keys_to_remove.reverse()
+			for key_idx in keys_to_remove:
+				animation.track_remove_key(track_idx, key_idx)
+				removed_count += 1
+	
+	if removed_count > 0:
+		print("Removed ", removed_count, " keyframe(s) for part '", selected_part.part_name, "' at time ", current_keyframe_time, "s")
+	else:
+		print("No keyframes found for part '", selected_part.part_name, "' at time ", current_keyframe_time, "s")
+	
+	# Update the keyframe timeline display
+	update_keyframe_timeline()
+
+func _on_seek_to_time_pressed():
+	if current_animation_name == "" or current_animation_name == "No animations":
+		print("No animation selected! Please select an animation first.")
+		return
+	
+	# Use the auto-load function to seek to the time
+	load_parts_at_animation_time(current_keyframe_time)
+
+func update_keyframe_controls_visibility():
+	if keyframe_controls_ui:
+		# Show keyframe controls if both a part and animation are selected
+		var should_show = (selected_part != null) and (current_animation_name != "" and current_animation_name != "No animations")
+		keyframe_controls_ui.visible = should_show
+		
+		if should_show:
+			# Update time input maximum based on animation length
+			if keyframe_time_input and current_animation_name != "":
+				var animation_player = voxel_skeleton.animation_player
+				if animation_player.has_animation_library("default"):
+					var library = animation_player.get_animation_library("default")
+					if library.has_animation(current_animation_name):
+						var animation = library.get_animation(current_animation_name)
+						keyframe_time_input.max_value = animation.length
+						print("Updated time range: 0.0 - ", animation.length, "s")
+			
+			print("Keyframe controls available for part '", selected_part.part_name, "' and animation '", current_animation_name, "'")
+
+func auto_save_keyframe_if_needed(part: VoxelPart):
+	# Auto-save keyframe when part transforms change during animation editing
+	if not auto_keyframe_enabled:
+		return
+	
+	if current_animation_name == "" or current_animation_name == "No animations":
+		return
+	
+	if not part:
+		return
+	
+	# Check if keyframe exists before creating/updating
+	var keyframe_exists = has_keyframe_at_time(part.part_name, current_keyframe_time)
+	
+	# Create/update keyframe with absolute transform (Godot expects absolute positions)
+	voxel_skeleton.add_part_keyframe(
+		current_animation_name,
+		part.part_name,
+		current_keyframe_time,
+		part.position,  # Store absolute position
+		part.rotation
+	)
+	
+	var action = "updated" if keyframe_exists else "created"
+	var rest_pos = get_part_rest_position(part.part_name)
+	var relative_pos = part.position - rest_pos
+	print("Auto-", action, " keyframe for part '", part.part_name, "' at time ", current_keyframe_time, "s")
+	print("  Absolute position: ", part.position, " (relative: ", relative_pos, ", rest: ", rest_pos, ")")
+	
+	# Update the keyframe timeline display
+	update_keyframe_timeline()
+
+func has_keyframe_at_time(part_name: String, time: float, tolerance: float = 0.05) -> bool:
+	# Check if there's a keyframe for this part at the specified time
+	var animation_player = voxel_skeleton.animation_player
+	if not animation_player.has_animation_library("default"):
+		return false
+	
+	var library = animation_player.get_animation_library("default")
+	if not library.has_animation(current_animation_name):
+		return false
+	
+	var animation = library.get_animation(current_animation_name)
+	var part_path = voxel_skeleton.get_path_to(voxel_skeleton.parts[part_name])
+	
+	for track_idx in range(animation.get_track_count()):
+		if animation.track_get_path(track_idx) == part_path:
+			for key_idx in range(animation.track_get_key_count(track_idx)):
+				var key_time = animation.track_get_key_time(track_idx, key_idx)
+				if abs(key_time - time) < tolerance:
+					return true
+	
+	return false
+
+func load_parts_at_animation_time(time: float):
+	# Load all part positions and rotations at the specified animation time
+	if current_animation_name == "" or current_animation_name == "No animations":
+		return
+	
+	# Simple debouncing: if this is the same time as the last seek, skip
+	if abs(time - last_seek_time) < 0.01:
+		print("DEBUG: Skipping duplicate seek to time ", time, "s")
+		return
+	
+	last_seek_time = time
+	
+	var animation_player = voxel_skeleton.animation_player
+	if not animation_player.has_animation_library("default"):
+		print("No animation library found")
+		return
+	
+	var library = animation_player.get_animation_library("default")
+	if not library.has_animation(current_animation_name):
+		print("Animation '", current_animation_name, "' not found in library")
+		return
+	
+	var animation = library.get_animation(current_animation_name)
+	
+	# Check if animation has any tracks
+	if animation.get_track_count() == 0:
+		print("Animation '", current_animation_name, "' has no tracks - keeping current part positions")
+		# Don't reset parts to default positions, just update UI
+		if selected_part:
+			update_part_ui_values()
+			update_pivot_marker()
+		return
+	
+	print("DEBUG: Seeking to time ", time, "s in animation '", current_animation_name, "'")
+	
+	# Stop any currently playing animation and reset to a known state
+	animation_player.stop()
+	
+	# Try to play and seek - check both direct name and library-prefixed name
+	var animation_ref = ""
+	if animation_player.has_animation(current_animation_name):
+		animation_ref = current_animation_name
+	elif animation_player.has_animation("default/" + current_animation_name):
+		animation_ref = "default/" + current_animation_name
+	
+	if animation_ref != "":
+		# Use a more robust seeking approach
+		animation_player.play(animation_ref)
+		animation_player.seek(time, true)  # true = update immediately
+		
+		# Give the animation system multiple frames to fully update
+		await get_tree().process_frame
+		await get_tree().process_frame
+		
+		# Force another seek to ensure we're at the exact time
+		animation_player.seek(time, true)
+		animation_player.pause()
+		
+		print("DEBUG: Animation player current time: ", animation_player.current_animation_position)
+		print("DEBUG: Animation player is playing: ", animation_player.is_playing())
+		
+		# Verify the part positions and rotations were actually updated
+		if selected_part:
+			print("DEBUG: Selected part '", selected_part.part_name, "' after seek:")
+			print("  Position: ", selected_part.position)
+			print("  Rotation (radians): ", selected_part.rotation)
+			print("  Rotation (degrees): ", Vector3(rad_to_deg(selected_part.rotation.x), rad_to_deg(selected_part.rotation.y), rad_to_deg(selected_part.rotation.z)))
+		
+		print("Loaded part transforms at time ", time, "s")
+	else:
+		print("AnimationPlayer does not recognize animation '", current_animation_name, "' (tried both direct and default/ prefix)")
+	
+	# Always update the UI values to reflect current transforms
+	if selected_part:
+		update_part_ui_values()
+		update_pivot_marker()
+
+func _on_auto_keyframe_toggled(enabled: bool):
+	auto_keyframe_enabled = enabled
+	print("Auto-keyframe ", "enabled" if enabled else "disabled")
+
 func _on_save_model_pressed():
 	# Create file dialog for saving
 	var save_dialog = FileDialog.new()
@@ -1603,10 +2190,14 @@ func _on_load_file_selected(path: String):
 		# Refresh part selector dropdown
 		refresh_part_selector()
 		
+		# Refresh animation list
+		refresh_animation_list()
+		
 		# Hide pivot marker since no part is selected
 		selected_part = null
 		part_manipulation_ui.visible = false
 		hide_pivot_marker()
+		update_keyframe_controls_visibility()
 	else:
 		print("Failed to load model!")
 	
@@ -1615,3 +2206,698 @@ func _on_load_file_selected(path: String):
 		if child is FileDialog and child.file_mode == FileDialog.FILE_MODE_OPEN_FILE:
 			child.queue_free()
 			break
+
+# Keyframe Timeline Functions
+
+func update_keyframe_timeline():
+	# Update the keyframe timeline display for the current part and animation
+	clear_keyframe_timeline()
+	
+	if not selected_part or current_animation_name == "" or current_animation_name == "No animations":
+		return
+	
+	var keyframes = get_keyframes_for_part(selected_part.part_name, current_animation_name)
+	if keyframes.is_empty():
+		# Show "No keyframes" message
+		var no_keyframes_label = Label.new()
+		no_keyframes_label.text = "No keyframes for part '" + selected_part.part_name + "' in animation '" + current_animation_name + "'"
+		no_keyframes_label.add_theme_color_override("font_color", Color.GRAY)
+		timeline_container.add_child(no_keyframes_label)
+		keyframe_display_items.append(no_keyframes_label)
+		return
+	
+	# Sort keyframes by time
+	keyframes.sort_custom(func(a, b): return a.time < b.time)
+	
+	# Create visual elements for each keyframe
+	for i in range(keyframes.size()):
+		var keyframe = keyframes[i]
+		var keyframe_panel = create_keyframe_display_item(keyframe, i)
+		timeline_container.add_child(keyframe_panel)
+		keyframe_display_items.append(keyframe_panel)
+
+func clear_keyframe_timeline():
+	# Remove all existing timeline items
+	for item in keyframe_display_items:
+		if is_instance_valid(item):
+			item.queue_free()
+	keyframe_display_items.clear()
+
+func create_keyframe_display_item(keyframe_data: Dictionary, index: int) -> Panel:
+	var panel = Panel.new()
+	panel.custom_minimum_size = Vector2(150, 120)
+	
+	# Create a styled panel background
+	var style_box = StyleBoxFlat.new()
+	style_box.bg_color = Color(0.2, 0.3, 0.4, 0.8)
+	style_box.border_width_left = 2
+	style_box.border_width_right = 2
+	style_box.border_width_top = 2
+	style_box.border_width_bottom = 2
+	style_box.border_color = Color(0.5, 0.7, 1.0, 1.0)
+	style_box.corner_radius_top_left = 4
+	style_box.corner_radius_top_right = 4
+	style_box.corner_radius_bottom_left = 4
+	style_box.corner_radius_bottom_right = 4
+	panel.add_theme_stylebox_override("panel", style_box)
+	
+	var vbox = VBoxContainer.new()
+	vbox.position = Vector2(5, 5)
+	vbox.size = Vector2(140, 110)
+	panel.add_child(vbox)
+	
+	# Time label
+	var time_label = Label.new()
+	time_label.text = "Time: %.1fs" % keyframe_data.time
+	time_label.add_theme_color_override("font_color", Color.WHITE)
+	vbox.add_child(time_label)
+	
+	# Position data
+	var pos_label = Label.new()
+	if keyframe_data.has("position"):
+		var rest_pos = get_part_rest_position(selected_part.part_name)
+		var relative_pos = keyframe_data.position - rest_pos
+		pos_label.text = "Pos: (%.1f, %.1f, %.1f)" % [relative_pos.x, relative_pos.y, relative_pos.z]
+	else:
+		pos_label.text = "Pos: (no data)"
+	pos_label.add_theme_color_override("font_color", Color.CYAN)
+	vbox.add_child(pos_label)
+	
+	# Rotation data
+	var rot_label = Label.new()
+	if keyframe_data.has("rotation"):
+		var rot_deg = keyframe_data.rotation * 180.0 / PI  # Convert to degrees
+		rot_label.text = "Rot: (%.0f°, %.0f°, %.0f°)" % [rot_deg.x, rot_deg.y, rot_deg.z]
+	else:
+		rot_label.text = "Rot: (no data)"
+	rot_label.add_theme_color_override("font_color", Color.YELLOW)
+	vbox.add_child(rot_label)
+	
+	# Index label
+	var index_label = Label.new()
+	index_label.text = "Keyframe #" + str(index + 1)
+	index_label.add_theme_color_override("font_color", Color.LIGHT_GRAY)
+	vbox.add_child(index_label)
+	
+	# Make clickable to seek to this keyframe time
+	var button = Button.new()
+	button.text = "Seek to " + str(keyframe_data.time) + "s"
+	button.pressed.connect(func(): seek_to_keyframe_time(keyframe_data.time))
+	vbox.add_child(button)
+	
+	return panel
+
+func get_keyframes_for_part(part_name: String, animation_name: String) -> Array:
+	# Extract keyframe data from the animation for the specified part
+	var keyframes = []
+	
+	if not voxel_skeleton or not voxel_skeleton.animation_player:
+		return keyframes
+	
+	var animation_player = voxel_skeleton.animation_player
+	if not animation_player.has_animation_library("default"):
+		return keyframes
+	
+	var library = animation_player.get_animation_library("default")
+	if not library.has_animation(animation_name):
+		return keyframes
+	
+	var animation = library.get_animation(animation_name)
+	var part = voxel_skeleton.get_part(part_name)
+	if not part:
+		return keyframes
+	
+	var node_path = voxel_skeleton.get_path_to(part)
+	print("DEBUG: Looking for tracks for part '", part_name, "' with node path: ", node_path)
+	
+	# Find all tracks that affect this part
+	for track_idx in range(animation.get_track_count()):
+		var track_path = animation.track_get_path(track_idx)
+		if track_path == node_path:
+			var track_type = animation.track_get_type(track_idx)
+			var type_name = "POSITION_3D" if track_type == Animation.TYPE_POSITION_3D else ("ROTATION_3D" if track_type == Animation.TYPE_ROTATION_3D else "OTHER")
+			print("DEBUG: Found matching track ", track_idx, " of type ", type_name, " with ", animation.track_get_key_count(track_idx), " keys")
+			
+			# Get all keys for this track
+			for key_idx in range(animation.track_get_key_count(track_idx)):
+				var time = animation.track_get_key_time(track_idx, key_idx)
+				var value = animation.track_get_key_value(track_idx, key_idx)
+				
+				# Find existing keyframe at this time or create new one
+				var existing_keyframe = null
+				for kf in keyframes:
+					if abs(kf.time - time) < 0.01:  # Same time (within 0.01s)
+						existing_keyframe = kf
+						break
+				
+				if not existing_keyframe:
+					existing_keyframe = {"time": time}
+					keyframes.append(existing_keyframe)
+				
+				# Add the track data to the keyframe
+				if track_type == Animation.TYPE_POSITION_3D:
+					existing_keyframe["position"] = value
+					print("DEBUG: Found position keyframe at time ", time, ": ", value)
+				elif track_type == Animation.TYPE_ROTATION_3D:
+					# Convert quaternion to euler
+					if value is Quaternion:
+						existing_keyframe["rotation"] = value.get_euler()
+						print("DEBUG: Found rotation keyframe at time ", time, ": ", value, " -> ", value.get_euler())
+					else:
+						existing_keyframe["rotation"] = value
+						print("DEBUG: Found rotation keyframe at time ", time, ": ", value, " (non-quaternion)")
+	
+	return keyframes
+
+func seek_to_keyframe_time(time: float):
+	# Update the keyframe time input and load animation at that time
+	print("DEBUG: Seeking to keyframe time ", time)
+	
+	# Set flag to prevent double-triggering of time change handler
+	is_seeking_to_keyframe = true
+	
+	if keyframe_time_input:
+		keyframe_time_input.value = time
+		current_keyframe_time = time
+		
+	# Clear flag before loading
+	is_seeking_to_keyframe = false
+	
+	await load_parts_at_animation_time(time)
+	# Force UI update after loading
+	if selected_part:
+		update_part_ui_values()
+		update_pivot_marker()
+
+# Animation Export/Import Functions
+
+func _on_export_animation_pressed():
+	if current_animation_name == "" or current_animation_name == "No animations":
+		print("No animation selected to export!")
+		return
+	
+	if not voxel_skeleton or not voxel_skeleton.animation_player:
+		print("No animation player available!")
+		return
+	
+	var animation_player = voxel_skeleton.animation_player
+	if not animation_player.has_animation_library("default"):
+		print("No animation library found!")
+		return
+	
+	var library = animation_player.get_animation_library("default")
+	if not library.has_animation(current_animation_name):
+		print("Animation '", current_animation_name, "' not found!")
+		return
+	
+	var animation = library.get_animation(current_animation_name)
+	export_animation_to_file(animation, current_animation_name)
+
+func _on_import_animation_pressed():
+	# Create file dialog for importing animations
+	var import_dialog = FileDialog.new()
+	import_dialog.title = "Import Animation"
+	import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	import_dialog.current_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
+	import_dialog.add_filter("*.json", "Animation files")
+	
+	add_child(import_dialog)
+	import_dialog.file_selected.connect(_on_animation_import_file_selected)
+	import_dialog.popup_centered(Vector2i(800, 600))
+
+func export_animation_to_file(animation: Animation, animation_name: String):
+	# Export animation as a JSON file with all track data
+	var animation_data = {
+		"name": animation_name,
+		"length": animation.length,
+		"tracks": []
+	}
+	
+	# Extract all tracks from the animation
+	for track_idx in range(animation.get_track_count()):
+		var track_data = {
+			"type": animation.track_get_type(track_idx),
+			"path": str(animation.track_get_path(track_idx)),
+			"keys": []
+		}
+		
+		# Extract all keyframes from this track
+		for key_idx in range(animation.track_get_key_count(track_idx)):
+			var time = animation.track_get_key_time(track_idx, key_idx)
+			var value = animation.track_get_key_value(track_idx, key_idx)
+			
+			# Convert the value to a serializable format
+			var serialized_value
+			if value is Vector3:
+				serialized_value = {"x": value.x, "y": value.y, "z": value.z}
+			elif value is Quaternion:
+				serialized_value = {"x": value.x, "y": value.y, "z": value.z, "w": value.w}
+			else:
+				serialized_value = str(value)
+			
+			track_data.keys.append({
+				"time": time,
+				"value": serialized_value
+			})
+		
+		animation_data.tracks.append(track_data)
+	
+	# Save to file
+	var file_path = "res://animations/" + animation_name + ".json"
+	
+	# Create animations directory if it doesn't exist
+	var dir = DirAccess.open("res://")
+	if not dir.dir_exists("animations"):
+		dir.make_dir("animations")
+	
+	var file = FileAccess.open(file_path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(animation_data, "\t"))
+		file.close()
+		print("Animation '", animation_name, "' exported to: ", file_path)
+		print("  Length: ", animation.length, "s")
+		print("  Tracks: ", animation.get_track_count())
+		print("  Total keyframes: ", get_total_keyframe_count(animation))
+	else:
+		print("Failed to save animation file: ", file_path)
+
+func _on_animation_import_file_selected(file_path: String):
+	import_animation_from_file(file_path)
+	
+	# Remove the dialog
+	for child in get_children():
+		if child is FileDialog and child.file_mode == FileDialog.FILE_MODE_OPEN_FILE:
+			child.queue_free()
+			break
+
+func import_animation_from_file(file_path: String):
+	if not FileAccess.file_exists(file_path):
+		print("Animation file not found: ", file_path)
+		return
+	
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	var json_string = file.get_as_text()
+	file.close()
+	
+	var json = JSON.new()
+	var parse_result = json.parse(json_string)
+	if parse_result != OK:
+		print("Failed to parse animation file: ", file_path)
+		return
+	
+	var animation_data = json.data
+	var imported_name = animation_data.name
+	
+	# Check if animation already exists and ask for confirmation
+	var animation_player = voxel_skeleton.animation_player
+	if animation_player.has_animation_library("default"):
+		var library = animation_player.get_animation_library("default")
+		if library.has_animation(imported_name):
+			# Create a unique name by adding a suffix
+			var counter = 1
+			var new_name = imported_name + "_imported"
+			while library.has_animation(new_name):
+				new_name = imported_name + "_imported_" + str(counter)
+				counter += 1
+			imported_name = new_name
+			print("Animation already exists, importing as: ", imported_name)
+	
+	# Create new animation
+	var new_animation = voxel_skeleton.create_animation(imported_name, animation_data.length)
+	
+	# Get current model's parts for mapping
+	var current_parts = voxel_skeleton.parts.keys()
+	
+	# Import all tracks with part name mapping
+	var tracks_imported = 0
+	var keyframes_imported = 0
+	var unmapped_parts = []
+	
+	for track_data in animation_data.tracks:
+		var track_type = track_data.type
+		var original_path = track_data.path
+		
+		# Extract part name from the path (e.g., "VoxelSkeleton/head" -> "head")
+		var original_part_name = extract_part_name_from_path(original_path)
+		
+		# Try to map the part name to current model
+		var mapped_part_name = map_part_name_for_current_model(original_part_name, current_parts)
+		
+		if mapped_part_name != "":
+			# Get the actual part and create the correct path
+			var part = voxel_skeleton.get_part(mapped_part_name)
+			if part:
+				var mapped_path = voxel_skeleton.get_path_to(part)
+				
+				# Create track with mapped path
+				var track_idx = new_animation.add_track(track_type)
+				new_animation.track_set_path(track_idx, mapped_path)
+				
+				# Add all keyframes to this track
+				for key_data in track_data.keys:
+					var time = key_data.time
+					var value_data = key_data.value
+					
+					# Convert serialized value back to proper type
+					var value
+					if track_type == Animation.TYPE_POSITION_3D:
+						if value_data is Dictionary:
+							value = Vector3(value_data.x, value_data.y, value_data.z)
+						else:
+							value = Vector3.ZERO
+					elif track_type == Animation.TYPE_ROTATION_3D:
+						if value_data is Dictionary:
+							value = Quaternion(value_data.x, value_data.y, value_data.z, value_data.w)
+						else:
+							value = Quaternion.IDENTITY
+					else:
+						value = value_data
+					
+					new_animation.track_insert_key(track_idx, time, value)
+					keyframes_imported += 1
+				
+				tracks_imported += 1
+				print("Mapped track: ", original_part_name, " -> ", mapped_part_name)
+			else:
+				unmapped_parts.append(original_part_name + " (part not found)")
+		else:
+			unmapped_parts.append(original_part_name + " (no mapping)")
+	
+	# Update the current animation selection
+	current_animation_name = imported_name
+	refresh_animation_list()
+	update_keyframe_timeline()
+	
+	print("Successfully imported animation '", imported_name, "':")
+	print("  Length: ", animation_data.length, "s")
+	print("  Tracks imported: ", tracks_imported)
+	print("  Keyframes imported: ", keyframes_imported)
+	
+	if unmapped_parts.size() > 0:
+		print("  Unmapped parts: ", unmapped_parts)
+
+func extract_part_name_from_path(path_string: String) -> String:
+	# Extract the last component of the path (the part name)
+	var parts = path_string.split("/")
+	if parts.size() > 0:
+		return parts[parts.size() - 1]
+	return ""
+
+func map_part_name_for_current_model(original_part_name: String, current_parts: Array) -> String:
+	# First try exact match
+	if original_part_name in current_parts:
+		return original_part_name
+	
+	# Try common mappings for different naming conventions
+	var part_mappings = {
+		# Common head variations
+		"head": ["head", "skull", "Head"],
+		"skull": ["head", "skull", "Head"],
+		"Head": ["head", "skull", "Head"],
+		
+		# Common body/torso variations
+		"torso": ["torso", "body", "chest", "Body", "Torso"],
+		"body": ["torso", "body", "chest", "Body", "Torso"],
+		"chest": ["torso", "body", "chest", "Body", "Torso"],
+		"Body": ["torso", "body", "chest", "Body", "Torso"],
+		"Torso": ["torso", "body", "chest", "Body", "Torso"],
+		
+		# Limb variations
+		"arm_left": ["arm_left", "left_arm", "armL", "ArmLeft"],
+		"arm_right": ["arm_right", "right_arm", "armR", "ArmRight"],
+		"leg_left": ["leg_left", "left_leg", "legL", "LegLeft"],
+		"leg_right": ["leg_right", "right_leg", "legR", "LegRight"],
+		
+		# Tail variations
+		"tail": ["tail", "Tail"],
+		"Tail": ["tail", "Tail"],
+	}
+	
+	# Try mapping variations
+	if original_part_name in part_mappings:
+		for possible_name in part_mappings[original_part_name]:
+			if possible_name in current_parts:
+				return possible_name
+	
+	# Try case-insensitive search
+	var original_lower = original_part_name.to_lower()
+	for part_name in current_parts:
+		if part_name.to_lower() == original_lower:
+			return part_name
+	
+	# Try partial matching (contains)
+	for part_name in current_parts:
+		if original_lower in part_name.to_lower() or part_name.to_lower() in original_lower:
+			return part_name
+	
+	# No mapping found
+	return ""
+
+func get_total_keyframe_count(animation: Animation) -> int:
+	var total = 0
+	for track_idx in range(animation.get_track_count()):
+		total += animation.track_get_key_count(track_idx)
+	return total
+
+# Animation Library Export/Import Functions
+
+func _on_export_all_animations_pressed():
+	if not voxel_skeleton or not voxel_skeleton.animation_player:
+		print("No animation player available!")
+		return
+	
+	var animation_player = voxel_skeleton.animation_player
+	if not animation_player.has_animation_library("default"):
+		print("No animation library found!")
+		return
+	
+	var library = animation_player.get_animation_library("default")
+	var animation_list = library.get_animation_list()
+	
+	if animation_list.size() == 0:
+		print("No animations to export!")
+		return
+	
+	export_animation_library_to_file(library, animation_list)
+
+func _on_import_animation_library_pressed():
+	# Create file dialog for importing animation libraries
+	var import_dialog = FileDialog.new()
+	import_dialog.title = "Import Animation Library"
+	import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	import_dialog.current_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
+	import_dialog.add_filter("*.json", "Animation Library files")
+	
+	add_child(import_dialog)
+	import_dialog.file_selected.connect(_on_animation_library_import_file_selected)
+	import_dialog.popup_centered(Vector2i(800, 600))
+
+func export_animation_library_to_file(library: AnimationLibrary, animation_names: PackedStringArray):
+	var library_data = {
+		"library_name": "exported_library",
+		"animations": {}
+	}
+	
+	# Export each animation
+	for animation_name in animation_names:
+		var animation = library.get_animation(animation_name)
+		if animation:
+			var animation_data = {
+				"length": animation.length,
+				"tracks": []
+			}
+			
+			# Extract all tracks from the animation
+			for track_idx in range(animation.get_track_count()):
+				var track_data = {
+					"type": animation.track_get_type(track_idx),
+					"path": str(animation.track_get_path(track_idx)),
+					"keys": []
+				}
+				
+				# Extract all keyframes from this track
+				for key_idx in range(animation.track_get_key_count(track_idx)):
+					var time = animation.track_get_key_time(track_idx, key_idx)
+					var value = animation.track_get_key_value(track_idx, key_idx)
+					
+					# Convert the value to a serializable format
+					var serialized_value
+					if value is Vector3:
+						serialized_value = {"x": value.x, "y": value.y, "z": value.z}
+					elif value is Quaternion:
+						serialized_value = {"x": value.x, "y": value.y, "z": value.z, "w": value.w}
+					else:
+						serialized_value = str(value)
+					
+					track_data.keys.append({
+						"time": time,
+						"value": serialized_value
+					})
+				
+				animation_data.tracks.append(track_data)
+			
+			library_data.animations[animation_name] = animation_data
+	
+	# Save to file
+	var file_path = "res://animations/animation_library_" + str(Time.get_unix_time_from_system()) + ".json"
+	
+	# Create animations directory if it doesn't exist
+	var dir = DirAccess.open("res://")
+	if not dir.dir_exists("animations"):
+		dir.make_dir("animations")
+	
+	var file = FileAccess.open(file_path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(library_data, "\t"))
+		file.close()
+		print("Animation library exported to: ", file_path)
+		print("  Animations exported: ", animation_names.size())
+		
+		var total_tracks = 0
+		var total_keyframes = 0
+		for animation_name in animation_names:
+			var animation = library.get_animation(animation_name)
+			total_tracks += animation.get_track_count()
+			total_keyframes += get_total_keyframe_count(animation)
+		
+		print("  Total tracks: ", total_tracks)
+		print("  Total keyframes: ", total_keyframes)
+	else:
+		print("Failed to save animation library file: ", file_path)
+
+func _on_animation_library_import_file_selected(file_path: String):
+	import_animation_library_from_file(file_path)
+	
+	# Remove the dialog
+	for child in get_children():
+		if child is FileDialog and child.file_mode == FileDialog.FILE_MODE_OPEN_FILE:
+			child.queue_free()
+			break
+
+func import_animation_library_from_file(file_path: String):
+	if not FileAccess.file_exists(file_path):
+		print("Animation library file not found: ", file_path)
+		return
+	
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	var json_string = file.get_as_text()
+	file.close()
+	
+	var json = JSON.new()
+	var parse_result = json.parse(json_string)
+	if parse_result != OK:
+		print("Failed to parse animation library file: ", file_path)
+		return
+	
+	var library_data = json.data
+	
+	if not library_data.has("animations"):
+		print("Invalid animation library format!")
+		return
+	
+	# Get current model's parts for mapping
+	var current_parts = voxel_skeleton.parts.keys()
+	
+	var animations_imported = 0
+	var total_tracks_imported = 0
+	var total_keyframes_imported = 0
+	var all_unmapped_parts = []
+	
+	# Import each animation in the library
+	for animation_name in library_data.animations:
+		var animation_data = library_data.animations[animation_name]
+		
+		# Check if animation already exists and create unique name
+		var imported_name = animation_name
+		var animation_player = voxel_skeleton.animation_player
+		if animation_player.has_animation_library("default"):
+			var library = animation_player.get_animation_library("default")
+			if library.has_animation(imported_name):
+				var counter = 1
+				var new_name = imported_name + "_imported"
+				while library.has_animation(new_name):
+					new_name = imported_name + "_imported_" + str(counter)
+					counter += 1
+				imported_name = new_name
+		
+		# Create new animation
+		var new_animation = voxel_skeleton.create_animation(imported_name, animation_data.length)
+		
+		# Import all tracks with part name mapping
+		var tracks_imported = 0
+		var keyframes_imported = 0
+		var unmapped_parts = []
+		
+		for track_data in animation_data.tracks:
+			var track_type = track_data.type
+			var original_path = track_data.path
+			
+			# Extract part name from the path
+			var original_part_name = extract_part_name_from_path(original_path)
+			
+			# Try to map the part name to current model
+			var mapped_part_name = map_part_name_for_current_model(original_part_name, current_parts)
+			
+			if mapped_part_name != "":
+				# Get the actual part and create the correct path
+				var part = voxel_skeleton.get_part(mapped_part_name)
+				if part:
+					var mapped_path = voxel_skeleton.get_path_to(part)
+					
+					# Create track with mapped path
+					var track_idx = new_animation.add_track(track_type)
+					new_animation.track_set_path(track_idx, mapped_path)
+					
+					# Add all keyframes to this track
+					for key_data in track_data.keys:
+						var time = key_data.time
+						var value_data = key_data.value
+						
+						# Convert serialized value back to proper type
+						var value
+						if track_type == Animation.TYPE_POSITION_3D:
+							if value_data is Dictionary:
+								value = Vector3(value_data.x, value_data.y, value_data.z)
+							else:
+								value = Vector3.ZERO
+						elif track_type == Animation.TYPE_ROTATION_3D:
+							if value_data is Dictionary:
+								value = Quaternion(value_data.x, value_data.y, value_data.z, value_data.w)
+							else:
+								value = Quaternion.IDENTITY
+						else:
+							value = value_data
+						
+						new_animation.track_insert_key(track_idx, time, value)
+						keyframes_imported += 1
+					
+					tracks_imported += 1
+				else:
+					unmapped_parts.append(original_part_name + " (part not found)")
+			else:
+				unmapped_parts.append(original_part_name + " (no mapping)")
+		
+		animations_imported += 1
+		total_tracks_imported += tracks_imported
+		total_keyframes_imported += keyframes_imported
+		
+		if unmapped_parts.size() > 0:
+			all_unmapped_parts.append(animation_name + ": " + str(unmapped_parts))
+		
+		print("Imported animation '", imported_name, "' (", tracks_imported, " tracks, ", keyframes_imported, " keyframes)")
+	
+	# Update UI
+	refresh_animation_list()
+	update_keyframe_timeline()
+	
+	print("Successfully imported animation library:")
+	print("  Animations imported: ", animations_imported)
+	print("  Total tracks imported: ", total_tracks_imported)
+	print("  Total keyframes imported: ", total_keyframes_imported)
+	
+	if all_unmapped_parts.size() > 0:
+		print("  Unmapped parts by animation:")
+		for entry in all_unmapped_parts:
+			print("    ", entry)
